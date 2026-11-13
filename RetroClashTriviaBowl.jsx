@@ -2467,6 +2467,36 @@ function inkFor(hex) {
 const TONE_COLORS = { great: '#06d6a0', good: '#4cc9f0', meh: '#f4a261', bad: '#ef476f' };
 const FONT_STYLE = { fontFamily: PIXEL_FONT };
 
+// Where the source lives, and a standalone single-file copy that runs offline.
+const REPO_URL = 'https://github.com/siddharthsivaramancode/krillion-sports-spinoff';
+const DOWNLOAD_URL = `${REPO_URL}/blob/main/retro-clash.html`;
+
+function SideLinks() {
+  const link = 'border-2 border-black bg-[#1b1736] px-2 py-2 text-[8px] text-white shadow-[2px_2px_0_#000] hover:bg-[#2a2450] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ffd23f]';
+  return (
+    <>
+      {/* desktop: a rail pinned to the right edge */}
+      <nav aria-label="Project links" className="fixed top-1/2 z-30 hidden -translate-y-1/2 flex-col gap-2 lg:flex" style={{ right: 'max(8px, env(safe-area-inset-right, 0px))' }}>
+        <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className={link} style={{ ...FONT_STYLE, writingMode: 'vertical-rl' }}>
+          GITHUB ↗
+        </a>
+        <a href={DOWNLOAD_URL} target="_blank" rel="noopener noreferrer" className={`${link} text-[#ffd23f]`} style={{ ...FONT_STYLE, writingMode: 'vertical-rl' }} title="Open the standalone HTML file on GitHub, then use 'Download raw file'">
+          DOWNLOAD HTML ↓
+        </a>
+      </nav>
+      {/* phones/tablets: compact links in the top bar */}
+      <span className="flex gap-2 lg:hidden">
+        <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className="border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] text-white shadow-[2px_2px_0_#000]" style={FONT_STYLE}>
+          GITHUB
+        </a>
+        <a href={DOWNLOAD_URL} target="_blank" rel="noopener noreferrer" className="border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] text-[#ffd23f] shadow-[2px_2px_0_#000]" style={FONT_STYLE} title="Standalone HTML file">
+          ↓ HTML
+        </a>
+      </span>
+    </>
+  );
+}
+
 const DEFAULT_SETUP = {
   sport: 'football',
   mode: '1p',
@@ -4038,9 +4068,12 @@ export default function RetroClashTriviaBowl() {
         ) : (
           <div className="text-[9px] text-slate-500">{screen === 'title' ? 'INSERT COIN' : 'RETRO CLASH: TRIVIA BOWL'}</div>
         )}
-        <button type="button" onClick={toggleMute} className="border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] shadow-[2px_2px_0_#000]" style={FONT_STYLE} aria-label={muted ? 'Unmute' : 'Mute'}>
-          {muted ? '🔇 MUTED' : '🔊 SOUND'}
-        </button>
+        <div className="flex items-center gap-2">
+          <SideLinks />
+          <button type="button" onClick={toggleMute} className="border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] shadow-[2px_2px_0_#000]" style={FONT_STYLE} aria-label={muted ? 'Unmute' : 'Mute'}>
+            {muted ? '🔇 MUTED' : '🔊 SOUND'}
+          </button>
+        </div>
       </div>
       {screen === 'title' && <TitleScreen career={career} onContinue={() => setScreen('hub')} onNew={() => setScreen('newCareer')} onQuick={() => setScreen('quickSetup')} />}
       {screen === 'newCareer' && (
