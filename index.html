@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Retro Clash: Trivia Bowl</title>
+    <!-- Zero-build harness: serve this folder over http (e.g. `npx serve .`) and open it. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com/3.4.5"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@18.3.1",
+          "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1"
+        }
+      }
+    </script>
+    <style>
+      body { margin: 0; background: #0d0b1e; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      const src = await (await fetch('./RetroClashTriviaBowl.jsx')).text();
+      const { code } = Babel.transform(src, { presets: [['react', { runtime: 'classic' }]], sourceType: 'module', filename: 'RetroClashTriviaBowl.jsx' });
+      const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+      const [{ default: App }, React, { createRoot }] = await Promise.all([import(url), import('react'), import('react-dom/client')]);
+      createRoot(document.getElementById('root')).render(React.createElement(App));
+    </script>
+  </body>
+</html>
