@@ -8,6 +8,7 @@ A retro pixel-art, **real-time** arcade sports game powered by trivia. Move with
 
 ## Play
 
+- **Play online:** https://siddharthsivaramancode.github.io/krillion-sports-spinoff/
 - **Download and play offline:** grab [`retro-clash.html`](retro-clash.html) (open it, then **Download raw file**) and double-click it. One self-contained file: no install, no server, no internet.
 - **Hosted page:** https://claude.ai/artifact/6x3DKkTJBjwU1Viv9a6psz (private unless shared).
 
@@ -22,7 +23,8 @@ Career progress saves in your browser's local storage (separately per browser, a
 | `trivia-bank.js` | Every prompt and answer. Paste new prompts here. |
 | `RetroClashTriviaBowl.jsx` | The game: config, sound, renderer, real-time engine, career mode, UI |
 | `retro-clash.html` | Built standalone copy (generated, don't edit by hand) |
-| `index.html` | Dev harness that loads the source files directly (serve the folder over http, e.g. `npx serve .`) |
+| `index.html` | Same built game, served at the GitHub Pages site root |
+| `dev.html` | Dev harness that loads the source files directly (serve the folder over http, e.g. `npx serve .`) |
 | `scripts/build-standalone.mjs` | Builds `retro-clash.html` |
 
 ## Adding trivia prompts

@@ -53,4 +53,5 @@ const html = `<!doctype html>
 </html>
 `;
 writeFileSync(join(root, 'retro-clash.html'), html);
-console.log(`retro-clash.html written (${Math.round(html.length / 1024)} KB)`);
+writeFileSync(join(root, 'index.html'), html); // GitHub Pages serves this at the site root
+console.log(`retro-clash.html + index.html written (${Math.round(html.length / 1024)} KB)`);
