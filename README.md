@@ -11,7 +11,7 @@ A retro pixel-art, **real-time** arcade sports game powered by trivia. Move with
 - **Download and play offline:** grab [`retro-clash.html`](retro-clash.html) (open it, then **Download raw file**) and double-click it. One self-contained file: no install, no server, no internet.
 - **Hosted page:** https://claude.ai/artifact/6x3DKkTJBjwU1Viv9a6psz (private unless shared).
 
-Controls: WASD / arrows move · SPACE (or J) pass / throw / hike / serve / tackle · SHIFT (or K) shoot / handoff / switch player · ESC pause. 2-player quick match: P1 WASD + F/G, P2 arrows + K/L. Phones and tablets get an on-screen joystick.
+Controls: WASD / arrows move · SPACE (or J) pass / throw / hike / serve / tackle · SHIFT (or K) shoot / handoff / switch player · ESC pause. 2-player quick match: P1 WASD + F/G, P2 arrows + K/L. Phones and tablets get an on-screen joystick. The ♪ button in the top bar switches the background music on/off (remembered), and 🔊 switches sound effects.
 
 Career progress saves in your browser's local storage (separately per browser, and separately for the hosted page vs the downloaded file).
 

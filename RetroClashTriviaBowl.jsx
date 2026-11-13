@@ -320,8 +320,127 @@ export const SOUND_ENGINE = (() => {
     },
   };
 
+  // --- Background music: a calm-but-upbeat chiptune loop (Am - F - C - G), synthesized live.
+  const MUSIC = {
+    bpm: 112,
+    chords: [
+      [57, 60, 64],
+      [53, 57, 60],
+      [48, 52, 55],
+      [55, 59, 62],
+    ],
+    melody: [
+      [0, 76], [3, 79], [6, 81], [10, 79], [12, 76], [14, 74],
+      [16, 72], [19, 74], [22, 76], [26, 72], [28, 69],
+      [32, 72], [35, 76], [38, 79], [42, 76], [44, 74], [46, 72],
+      [48, 74], [51, 71], [54, 67], [58, 71], [60, 74],
+    ],
+  };
+  let musicTimer = null;
+  let musicGain = null;
+  let musicOn = false;
+  let nextT = 0;
+  let step = 0;
+  const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+  function mnote(type, freq, t, dur, vol) {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.03, dur / 3));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g);
+    g.connect(musicGain);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+
+  function mStep(t, s) {
+    const sixteenth = 60 / MUSIC.bpm / 4;
+    const pos = s % 16;
+    const ch = MUSIC.chords[Math.floor(s / 16) % 4];
+    if (pos === 0) ch.forEach((n) => mnote('sine', mtof(n), t, sixteenth * 16 * 0.97, 0.05)); // warm pad
+    if (pos % 4 === 0 || pos === 6 || pos === 14) mnote('triangle', mtof(ch[0] - 12), t, sixteenth * 2.6, 0.2); // bass
+    mnote('square', mtof(ch[pos % 3] + 12 + (pos >= 8 ? 12 : 0)), t, sixteenth * 0.9, 0.022); // soft arpeggio
+    const mel = MUSIC.melody.find(([at]) => at === s % 64);
+    if (mel) mnote('triangle', mtof(mel[1]), t, sixteenth * 2.8, 0.07); // lead
+    if (pos === 0 || pos === 8) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.setValueAtTime(120, t);
+      o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+      g.gain.setValueAtTime(0.18, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+      o.connect(g);
+      g.connect(musicGain);
+      o.start(t);
+      o.stop(t + 0.16);
+    }
+    if (pos % 4 === 2) {
+      const src = noiseSource();
+      const f = ctx.createBiquadFilter();
+      const g = ctx.createGain();
+      f.type = 'highpass';
+      f.frequency.value = 7000;
+      g.gain.setValueAtTime(0.04, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+      src.connect(f);
+      f.connect(g);
+      g.connect(musicGain);
+      src.start(t);
+      src.stop(t + 0.05);
+    }
+  }
+
+  function startMusic() {
+    const c = ensure();
+    if (!c || musicTimer) return;
+    musicGain = c.createGain();
+    musicGain.gain.setValueAtTime(0.0001, c.currentTime);
+    musicGain.gain.exponentialRampToValueAtTime(0.55, c.currentTime + 2);
+    musicGain.connect(c.destination);
+    nextT = c.currentTime + 0.1;
+    step = 0;
+    musicTimer = setInterval(() => {
+      const sixteenth = 60 / MUSIC.bpm / 4;
+      if (nextT < c.currentTime - 1) nextT = c.currentTime + 0.05; // tab was asleep: skip ahead instead of bursting
+      while (nextT < c.currentTime + 0.25) {
+        try {
+          mStep(nextT, step);
+        } catch (e) {
+          /* never break the game for music */
+        }
+        nextT += sixteenth;
+        step += 1;
+      }
+    }, 40);
+  }
+
+  function stopMusic() {
+    if (!musicTimer) return;
+    clearInterval(musicTimer);
+    musicTimer = null;
+    const g = musicGain;
+    if (g && ctx) {
+      g.gain.cancelScheduledValues(ctx.currentTime);
+      g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
+      setTimeout(() => g.disconnect(), 800);
+    }
+    musicGain = null;
+  }
+
   return {
+    setMusic(on) {
+      musicOn = on;
+      if (on) startMusic();
+      else stopMusic();
+    },
+    isMusicOn: () => musicOn,
     unlock: () => ensure(),
+    unlocked: () => !!ctx && ctx.state === 'running',
     play(name) {
       if (muted) return;
       const c = ensure();
@@ -1672,10 +1791,10 @@ function socCarrierAI(S, i, dt) {
   p.y = clamp(p.y, SOC_BOX.y0, SOC_BOX.y1);
   p.think -= dt;
   if (p.think > 0) return;
-  p.think = 0.3;
+  p.think = 0.42;
   const dGoal = Math.abs(p.x - gx);
   const press = nearestOppDist(S, p);
-  if ((dGoal < 78 && (press > 16 || Math.random() < 0.3)) || b.held > 6.5) {
+  if ((dGoal < 68 && (press > 18 || Math.random() < 0.2)) || b.held > 7) {
     socShoot(S, i, S.cpu(team));
     return;
   }
@@ -1709,7 +1828,7 @@ function socAI(S, i, dt, chasers) {
     const tgt = b.owner >= 0 ? S.players[b.owner] : b;
     steer(p, tgt.x, tgt.y, sp, dt);
     if (b.owner >= 0 && S.players[b.owner].team !== p.team && pdist(p, S.players[b.owner]) < 7) {
-      const rate = S.humans[p.team] ? 0.35 : AC().cpuStealPerSec * S.cpuSkill;
+      const rate = S.humans[p.team] ? 0.6 : AC().cpuStealPerSec * S.cpuSkill;
       if (Math.random() < rate * dt) attemptSteal(S, i, 1, 'STOLEN!');
     }
     return;
@@ -2225,10 +2344,12 @@ function fbThrow(S, qbIdx, recvIdx, o) {
     return;
   }
   const tier = o.kind === 'answer' ? o.tier : 0;
-  const d = pdist(qb, r);
-  const T = clamp(d / 165, 0.35, 1.1);
-  let tx = r.x + r.vx * T;
-  let ty = clamp(r.y + r.vy * T, FIELD_TOP + 4, FIELD_BOT - 4);
+  // Rarer answers throw further downfield and lead the receiver into open space.
+  const lead = { 5: 75, 4: 42, 3: 16 }[tier] || 0;
+  let T = clamp(pdist(qb, r) / 165, 0.35, 1.1);
+  let tx = Math.min(FY(104), r.x + r.vx * T + lead);
+  let ty = clamp(r.y + r.vy * T, FIELD_TOP + 6, FIELD_BOT - 6);
+  T = clamp(Math.max(Math.hypot(tx - qb.x, ty - qb.y) / 165, Math.hypot(tx - r.x, ty - r.y) / (r.speed * 1.05)), 0.35, 1.6);
   let result;
   let interceptor = -1;
   if (o.counter) {
@@ -2450,10 +2571,17 @@ function fbBall(S, dt) {
     return;
   }
   const r = S.players[fl.recv];
-  if (fl.result === 'catch' && Math.hypot(r.x - b.x, r.y - b.y) < 16) {
+  if (fl.result === 'catch' && Math.hypot(r.x - b.x, r.y - b.y) < 18) {
     r.x = b.x;
     r.y = b.y;
     fbGive(S, fl.recv);
+    if (fl.tier >= 4) {
+      // caught in stride: nearby defenders are wrong-footed and the receiver gets a burst
+      S.players.forEach((q) => {
+        if (q.team !== r.team && pdist(q, r) < 26) q.stun = fl.tier === 5 ? 1.3 : 0.7;
+      });
+      r.speed *= fl.tier === 5 ? 1.25 : 1.12;
+    }
     S.say(fl.tier >= 4 ? `${tierWord(fl.tier)} CATCH!` : 'CAUGHT!', '#06d6a0', 12);
     if (S.humans[1 - r.team]) autoSwitch(S, 1 - r.team);
     return;
@@ -2747,7 +2875,7 @@ const TennisArcade = {
     if (b.x < -12 || b.x > 332 || b.y < -12 || b.y > 192) return tnPoint(S, b.bounces >= 1 ? b.lastHitter : 1 - b.lastHitter, b.bounces >= 1 ? 'WINNER!' : 'OUT!');
     const recv = 1 - b.lastHitter;
     const rp = P[recv];
-    if (!b.hitLock && b.bounces >= 1 && b.z < 18 && Math.hypot(rp.x - b.x, rp.y - b.y) < 12) {
+    if (!b.hitLock && b.bounces >= 1 && b.z < 20 && Math.hypot(rp.x - b.x, rp.y - b.y) < (S.humans[recv] ? 15 : 12)) {
       b.hitLock = true;
       if (S.humans[recv]) S.ask(recv, 'hit', { from: recv });
       else tnHit(S, recv, S.cpu(recv), false);
@@ -5232,6 +5360,7 @@ function tutorialPages() {
             ['SHIFT (or K)', 'Shoot, hand off, switch player'],
             ['ENTER', 'Submit an answer, start a match'],
             ['ESC / P', 'Pause'],
+            ['♪ / 🔊', 'Background music and sound effects each switch on/off in the top bar'],
             ['2 PLAYERS', 'Quick match only: P1 WASD + F/G, P2 arrows + K/L'],
             ['PHONE / TABLET', 'On-screen joystick and buttons appear automatically'],
           ]}
@@ -5988,6 +6117,8 @@ function quickRoster(sport, stars) {
   return r;
 }
 
+const MUSIC_KEY = 'retro-clash-music';
+
 const RETRO_CSS = `
 .crt{background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),radial-gradient(ellipse at center,transparent 60%,rgba(0,0,0,.45) 100%);}
 .retro-bg{background-color:#0d0b1e;background-image:radial-gradient(#1f1a40 1px,transparent 1px),linear-gradient(180deg,#120e2a 0%,#0d0b1e 60%);background-size:12px 12px,100% 100%;}
@@ -6005,10 +6136,44 @@ export default function RetroClashTriviaBowl() {
   const [gameKey, setGameKey] = useState(0);
   const [muted, setMuted] = useState(false);
   const [tutorial, setTutorial] = useState(false);
+  const [music, setMusic] = useState(() => {
+    try {
+      return window.localStorage.getItem(MUSIC_KEY) !== 'off';
+    } catch (e) {
+      return true;
+    }
+  });
 
   useEffect(() => {
     if (career) saveCareer(career);
   }, [career]);
+
+  // Browsers only allow audio after a click/keypress, so music starts on the first interaction.
+  useEffect(() => {
+    if (!music) {
+      SOUND_ENGINE.setMusic(false);
+      return undefined;
+    }
+    const begin = () => SOUND_ENGINE.setMusic(true);
+    if (SOUND_ENGINE.unlocked()) begin();
+    window.addEventListener('pointerdown', begin, { once: true });
+    window.addEventListener('keydown', begin, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', begin);
+      window.removeEventListener('keydown', begin);
+    };
+  }, [music]);
+
+  const toggleMusic = () => {
+    const on = !music;
+    setMusic(on);
+    try {
+      window.localStorage.setItem(MUSIC_KEY, on ? 'on' : 'off');
+    } catch (e) {
+      /* ignore */
+    }
+    SOUND_ENGINE.setMusic(on);
+  };
 
   const toggleMute = () => {
     const m = !muted;
@@ -6079,6 +6244,10 @@ export default function RetroClashTriviaBowl() {
             </button>
           )}
           <SideLinks rail={!inMatch} />
+          <button type="button" onClick={toggleMusic} className={barBtn} style={FONT_STYLE} aria-pressed={music} aria-label={music ? 'Turn music off' : 'Turn music on'} title={music ? 'Music on' : 'Music off'}>
+            <span className={music ? 'text-[#06d6a0]' : 'text-slate-500'}>♪</span>
+            <span className="hidden sm:inline">{music ? ' MUSIC' : ' MUSIC OFF'}</span>
+          </button>
           <button type="button" onClick={toggleMute} className={barBtn} style={FONT_STYLE} aria-label={muted ? 'Unmute' : 'Mute'}>
             {muted ? '🔇' : '🔊'}
             <span className="hidden sm:inline">{muted ? ' MUTED' : ' SOUND'}</span>
