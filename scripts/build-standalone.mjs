@@ -43,7 +43,6 @@ const html = `<!doctype html>
   :root { --bg: #0d0b1e; --fg: #ffffff; color-scheme: dark; }
   html, body { margin: 0; background: var(--bg); color: var(--fg); }
   body { font-family: 'Press Start 2P', ui-monospace, monospace; }
-  #root > div { padding-left: max(16px, env(safe-area-inset-left, 0px)) !important; padding-right: max(16px, env(safe-area-inset-right, 0px)) !important; }
   button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid #ffd23f; outline-offset: 2px; }
 </style>
 </head>

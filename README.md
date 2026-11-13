@@ -20,13 +20,14 @@ Career progress saves in your browser's local storage, separately for each brows
 
 ## Adding trivia prompts
 
-Append objects to `TRIVIA_BANK` at the top of `RetroClashTriviaBowl.jsx`:
+The bank has 70 prompts and about 3,900 answers. Add to `RANKED_PROMPTS` at the top of `RetroClashTriviaBowl.jsx`, listing every valid answer **from most common to rarest**:
 
 ```js
-{ id: 'unique-id', category: 'SPORTS', prompt: 'Name a ...', answers: [{ text: 'Answer', aliases: ['alt spelling'], tier: 3 }] }
+{ id: 'unique-id', category: 'SPORTS', prompt: 'Name a ...', rankedBy: 'what popularity signal you ordered by',
+  ranked: ['Most Common|alias', 'Next', /* ... */ 'Rarest'] }
 ```
 
-Tier 1 is the most obvious answer, tier 5 the rarest. New categories automatically get their own "category specialist" players in career mode. Tune gameplay in `GAME_CONFIG` and `CAREER_CONFIG`.
+Tiers are computed from each answer's position using `RARITY_CUTOFFS` (top 12% = T1, next 18% = T2, next 30% = T3, next 25% = T4, rarest 15% = T5). Hand-tiered prompts can go in `CUSTOM_PROMPTS`. Matching already handles case, accents, punctuation, "the", plurals and small typos. New categories automatically get "category specialist" players in career mode. Tune gameplay in `GAME_CONFIG` and `CAREER_CONFIG`.
 
 ## Rebuild the standalone file
 

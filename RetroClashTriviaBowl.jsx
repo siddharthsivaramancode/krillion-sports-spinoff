@@ -13,304 +13,152 @@
      5b. CAREER_ENGINE   – club/league/market/contract logic over a JSON save (localStorage)
      6. APP_UI           – title, career hub (home/roster/market/league/schedule), match screen, box score
 
-   ADDING PROMPTS: append objects to TRIVIA_BANK with the same shape:
-     { id, category, prompt, answers: [{ text, aliases: [], tier }] }
-     tier 1 = most obvious answer ... tier 5 = ultra-rare deep cut.
-     ids must be unique. Aliases are optional extra spellings; matching already
-     ignores case, accents, punctuation, spaces, leading "the", and minor typos.
+   ADDING PROMPTS: add to RANKED_PROMPTS in section 1. List every valid answer
+     from most common to rarest; tiers are computed from list position via
+     RARITY_CUTOFFS. Hand-tiered prompts can go in CUSTOM_PROMPTS instead.
+     ids must be unique. See the section 1 header for the full format.
 ============================================================================= */
 
 import React, { useState, useEffect, useRef, useCallback, useMemo, useReducer } from 'react';
 
 /* =============================================================================
    1. TRIVIA_BANK
+   -----------------------------------------------------------------------------
+   Two ways to add prompts (both end up in TRIVIA_BANK with the same shape):
+
+   A) RANKED_PROMPTS (recommended): list EVERY valid answer, ordered from the
+      most common answer people give down to the rarest. Tiers are computed from
+      each answer's position in that list using RARITY_CUTOFFS, so rarity is
+      consistent across the whole bank instead of hand-guessed per answer.
+      Entry format: 'Display Text|alias one|alias two'.
+      `rankedBy` documents the popularity signal used to order the list.
+
+   B) CUSTOM_PROMPTS: hand-tiered prompts in the original explicit shape:
+      { id, category, prompt, answers: [{ text, aliases: [], tier }] }
+
+   Matching already ignores case, accents, punctuation, spaces, a leading
+   "the/a/an", simple plurals and small typos, so aliases are only needed for
+   genuinely different names (nicknames, abbreviations, old names).
 ============================================================================= */
-export const TRIVIA_BANK = [
-  {
-    id: 'nfl-teams',
-    category: 'SPORTS',
-    prompt: 'Name an NFL team',
-    answers: [
-      { text: 'Cowboys', aliases: ['dallas cowboys', 'dallas'], tier: 1 },
-      { text: 'Patriots', aliases: ['new england patriots', 'new england', 'pats'], tier: 1 },
-      { text: 'Packers', aliases: ['green bay packers', 'green bay'], tier: 1 },
-      { text: 'Steelers', aliases: ['pittsburgh steelers', 'pittsburgh'], tier: 2 },
-      { text: '49ers', aliases: ['niners', 'forty niners', 'san francisco 49ers', 'san francisco'], tier: 2 },
-      { text: 'Chiefs', aliases: ['kansas city chiefs', 'kansas city', 'kc chiefs'], tier: 2 },
-      { text: 'Eagles', aliases: ['philadelphia eagles', 'philadelphia', 'philly'], tier: 3 },
-      { text: 'Bears', aliases: ['chicago bears', 'chicago'], tier: 3 },
-      { text: 'Giants', aliases: ['new york giants', 'ny giants'], tier: 3 },
-      { text: 'Broncos', aliases: ['denver broncos', 'denver'], tier: 3 },
-      { text: 'Seahawks', aliases: ['seattle seahawks', 'seattle'], tier: 4 },
-      { text: 'Ravens', aliases: ['baltimore ravens', 'baltimore'], tier: 4 },
-      { text: 'Vikings', aliases: ['minnesota vikings', 'minnesota'], tier: 4 },
-      { text: 'Jaguars', aliases: ['jacksonville jaguars', 'jacksonville', 'jags'], tier: 5 },
-      { text: 'Texans', aliases: ['houston texans', 'houston'], tier: 5 },
-      { text: 'Cardinals', aliases: ['arizona cardinals', 'arizona'], tier: 5 },
-    ],
-  },
-  {
-    id: 'africa-countries',
-    category: 'GEOGRAPHY',
-    prompt: 'Name a country in Africa',
-    answers: [
-      { text: 'Egypt', aliases: [], tier: 1 },
-      { text: 'South Africa', aliases: [], tier: 1 },
-      { text: 'Nigeria', aliases: [], tier: 1 },
-      { text: 'Kenya', aliases: [], tier: 2 },
-      { text: 'Morocco', aliases: [], tier: 2 },
-      { text: 'Ethiopia', aliases: [], tier: 2 },
-      { text: 'Ghana', aliases: [], tier: 3 },
-      { text: 'Algeria', aliases: [], tier: 3 },
-      { text: 'Tanzania', aliases: [], tier: 3 },
-      { text: 'Senegal', aliases: [], tier: 4 },
-      { text: 'Madagascar', aliases: [], tier: 4 },
-      { text: 'Zimbabwe', aliases: [], tier: 4 },
-      { text: 'Burkina Faso', aliases: [], tier: 5 },
-      { text: 'Eritrea', aliases: [], tier: 5 },
-      { text: 'Djibouti', aliases: [], tier: 5 },
-      { text: 'Lesotho', aliases: [], tier: 5 },
-    ],
-  },
-  {
-    id: 'fruits',
-    category: 'FOOD',
-    prompt: 'Name a fruit',
-    answers: [
-      { text: 'Apple', aliases: [], tier: 1 },
-      { text: 'Banana', aliases: [], tier: 1 },
-      { text: 'Orange', aliases: [], tier: 1 },
-      { text: 'Strawberry', aliases: [], tier: 2 },
-      { text: 'Grape', aliases: ['grapes'], tier: 2 },
-      { text: 'Mango', aliases: [], tier: 2 },
-      { text: 'Pineapple', aliases: [], tier: 3 },
-      { text: 'Watermelon', aliases: [], tier: 3 },
-      { text: 'Peach', aliases: [], tier: 3 },
-      { text: 'Cherry', aliases: ['cherries'], tier: 3 },
-      { text: 'Kiwi', aliases: ['kiwifruit'], tier: 4 },
-      { text: 'Papaya', aliases: [], tier: 4 },
-      { text: 'Pomegranate', aliases: [], tier: 4 },
-      { text: 'Lychee', aliases: ['litchi', 'lichee'], tier: 5 },
-      { text: 'Durian', aliases: [], tier: 5 },
-      { text: 'Rambutan', aliases: [], tier: 5 },
-      { text: 'Persimmon', aliases: [], tier: 5 },
-    ],
-  },
-  {
-    id: 'us-states',
-    category: 'GEOGRAPHY',
-    prompt: 'Name a US state',
-    answers: [
-      { text: 'California', aliases: ['cali'], tier: 1 },
-      { text: 'Texas', aliases: [], tier: 1 },
-      { text: 'Florida', aliases: [], tier: 1 },
-      { text: 'New York', aliases: [], tier: 1 },
-      { text: 'Ohio', aliases: [], tier: 2 },
-      { text: 'Washington', aliases: [], tier: 2 },
-      { text: 'Georgia', aliases: [], tier: 2 },
-      { text: 'Colorado', aliases: [], tier: 3 },
-      { text: 'Arizona', aliases: [], tier: 3 },
-      { text: 'Michigan', aliases: [], tier: 3 },
-      { text: 'Oregon', aliases: [], tier: 4 },
-      { text: 'Nevada', aliases: [], tier: 4 },
-      { text: 'Kentucky', aliases: [], tier: 4 },
-      { text: 'Wyoming', aliases: [], tier: 5 },
-      { text: 'Delaware', aliases: [], tier: 5 },
-      { text: 'North Dakota', aliases: [], tier: 5 },
-      { text: 'Vermont', aliases: [], tier: 5 },
-    ],
-  },
-  {
-    id: 'dog-breeds',
-    category: 'ANIMALS',
-    prompt: 'Name a breed of dog',
-    answers: [
-      { text: 'Labrador', aliases: ['lab', 'labrador retriever'], tier: 1 },
-      { text: 'Golden Retriever', aliases: ['golden'], tier: 1 },
-      { text: 'German Shepherd', aliases: ['alsatian'], tier: 1 },
-      { text: 'Poodle', aliases: [], tier: 2 },
-      { text: 'Bulldog', aliases: ['english bulldog', 'french bulldog', 'frenchie'], tier: 2 },
-      { text: 'Beagle', aliases: [], tier: 2 },
-      { text: 'Husky', aliases: ['siberian husky'], tier: 3 },
-      { text: 'Chihuahua', aliases: [], tier: 3 },
-      { text: 'Dachshund', aliases: ['wiener dog', 'sausage dog'], tier: 3 },
-      { text: 'Pug', aliases: [], tier: 3 },
-      { text: 'Boxer', aliases: [], tier: 4 },
-      { text: 'Great Dane', aliases: [], tier: 4 },
-      { text: 'Corgi', aliases: ['welsh corgi', 'pembroke welsh corgi'], tier: 4 },
-      { text: 'Shiba Inu', aliases: ['shiba'], tier: 5 },
-      { text: 'Basenji', aliases: [], tier: 5 },
-      { text: 'Vizsla', aliases: [], tier: 5 },
-      { text: 'Weimaraner', aliases: [], tier: 5 },
-    ],
-  },
-  {
-    id: 'elements',
-    category: 'SCIENCE',
-    prompt: 'Name a chemical element',
-    answers: [
-      { text: 'Oxygen', aliases: [], tier: 1 },
-      { text: 'Hydrogen', aliases: [], tier: 1 },
-      { text: 'Carbon', aliases: [], tier: 1 },
-      { text: 'Gold', aliases: [], tier: 2 },
-      { text: 'Iron', aliases: [], tier: 2 },
-      { text: 'Helium', aliases: [], tier: 2 },
-      { text: 'Nitrogen', aliases: [], tier: 3 },
-      { text: 'Silver', aliases: [], tier: 3 },
-      { text: 'Sodium', aliases: [], tier: 3 },
-      { text: 'Neon', aliases: [], tier: 4 },
-      { text: 'Uranium', aliases: [], tier: 4 },
-      { text: 'Calcium', aliases: [], tier: 4 },
-      { text: 'Tungsten', aliases: ['wolfram'], tier: 5 },
-      { text: 'Bismuth', aliases: [], tier: 5 },
-      { text: 'Xenon', aliases: [], tier: 5 },
-      { text: 'Molybdenum', aliases: [], tier: 5 },
-    ],
-  },
-  {
-    id: 'beatles-songs',
-    category: 'MUSIC',
-    prompt: 'Name a Beatles song',
-    answers: [
-      { text: 'Hey Jude', aliases: [], tier: 1 },
-      { text: 'Let It Be', aliases: [], tier: 1 },
-      { text: 'Yesterday', aliases: [], tier: 1 },
-      { text: 'Yellow Submarine', aliases: [], tier: 2 },
-      { text: 'Help!', aliases: ['help'], tier: 2 },
-      { text: 'Come Together', aliases: [], tier: 2 },
-      { text: 'Here Comes the Sun', aliases: [], tier: 3 },
-      { text: 'Twist and Shout', aliases: [], tier: 3 },
-      { text: 'All You Need Is Love', aliases: [], tier: 3 },
-      { text: 'Eleanor Rigby', aliases: [], tier: 4 },
-      { text: 'Penny Lane', aliases: [], tier: 4 },
-      { text: 'Blackbird', aliases: [], tier: 4 },
-      { text: 'Strawberry Fields Forever', aliases: ['strawberry fields'], tier: 5 },
-      { text: "Octopus's Garden", aliases: ['octopus garden'], tier: 5 },
-      { text: 'Norwegian Wood', aliases: [], tier: 5 },
-      { text: 'Paperback Writer', aliases: [], tier: 5 },
-    ],
-  },
-  {
-    id: 'euro-capitals',
-    category: 'GEOGRAPHY',
-    prompt: 'Name a European capital city',
-    answers: [
-      { text: 'Paris', aliases: [], tier: 1 },
-      { text: 'London', aliases: [], tier: 1 },
-      { text: 'Rome', aliases: [], tier: 1 },
-      { text: 'Berlin', aliases: [], tier: 2 },
-      { text: 'Madrid', aliases: [], tier: 2 },
-      { text: 'Moscow', aliases: [], tier: 2 },
-      { text: 'Amsterdam', aliases: [], tier: 3 },
-      { text: 'Athens', aliases: [], tier: 3 },
-      { text: 'Vienna', aliases: ['wien'], tier: 3 },
-      { text: 'Dublin', aliases: [], tier: 3 },
-      { text: 'Lisbon', aliases: ['lisboa'], tier: 4 },
-      { text: 'Prague', aliases: ['praha'], tier: 4 },
-      { text: 'Stockholm', aliases: [], tier: 4 },
-      { text: 'Ljubljana', aliases: [], tier: 5 },
-      { text: 'Vilnius', aliases: [], tier: 5 },
-      { text: 'Valletta', aliases: [], tier: 5 },
-      { text: 'Tallinn', aliases: [], tier: 5 },
-    ],
-  },
-  {
-    id: 'olympic-sports',
-    category: 'SPORTS',
-    prompt: 'Name a Summer Olympic sport',
-    answers: [
-      { text: 'Swimming', aliases: [], tier: 1 },
-      { text: 'Track and Field', aliases: ['athletics', 'track'], tier: 1 },
-      { text: 'Gymnastics', aliases: [], tier: 1 },
-      { text: 'Basketball', aliases: [], tier: 2 },
-      { text: 'Soccer', aliases: ['football'], tier: 2 },
-      { text: 'Tennis', aliases: [], tier: 2 },
-      { text: 'Boxing', aliases: [], tier: 3 },
-      { text: 'Volleyball', aliases: ['beach volleyball'], tier: 3 },
-      { text: 'Diving', aliases: [], tier: 3 },
-      { text: 'Cycling', aliases: ['bmx'], tier: 3 },
-      { text: 'Fencing', aliases: [], tier: 4 },
-      { text: 'Rowing', aliases: [], tier: 4 },
-      { text: 'Wrestling', aliases: [], tier: 4 },
-      { text: 'Modern Pentathlon', aliases: ['pentathlon'], tier: 5 },
-      { text: 'Handball', aliases: ['team handball'], tier: 5 },
-      { text: 'Trampoline', aliases: [], tier: 5 },
-      { text: 'Water Polo', aliases: [], tier: 5 },
-    ],
-  },
-  {
-    id: 'pixar-movies',
-    category: 'MOVIES',
-    prompt: 'Name a Pixar movie',
-    answers: [
-      { text: 'Toy Story', aliases: [], tier: 1 },
-      { text: 'Finding Nemo', aliases: [], tier: 1 },
-      { text: 'Cars', aliases: [], tier: 1 },
-      { text: 'Up', aliases: [], tier: 2 },
-      { text: 'Monsters, Inc.', aliases: ['monsters inc', 'monsters incorporated'], tier: 2 },
-      { text: 'The Incredibles', aliases: [], tier: 2 },
-      { text: 'Inside Out', aliases: [], tier: 3 },
-      { text: 'Coco', aliases: [], tier: 3 },
-      { text: 'Ratatouille', aliases: [], tier: 3 },
-      { text: 'WALL-E', aliases: ['walle'], tier: 3 },
-      { text: 'Brave', aliases: [], tier: 4 },
-      { text: "A Bug's Life", aliases: ['bugs life'], tier: 4 },
-      { text: 'Soul', aliases: [], tier: 4 },
-      { text: 'Luca', aliases: [], tier: 5 },
-      { text: 'Onward', aliases: [], tier: 5 },
-      { text: 'The Good Dinosaur', aliases: [], tier: 5 },
-      { text: 'Elemental', aliases: [], tier: 5 },
-    ],
-  },
-  {
-    id: 'tennis-players',
-    category: 'SPORTS',
-    prompt: 'Name a famous tennis player (past or present)',
-    answers: [
-      { text: 'Serena Williams', aliases: ['serena'], tier: 1 },
-      { text: 'Roger Federer', aliases: ['federer'], tier: 1 },
-      { text: 'Rafael Nadal', aliases: ['nadal', 'rafa', 'rafa nadal'], tier: 1 },
-      { text: 'Novak Djokovic', aliases: ['djokovic', 'novak'], tier: 2 },
-      { text: 'Venus Williams', aliases: ['venus'], tier: 2 },
-      { text: 'Andre Agassi', aliases: ['agassi'], tier: 2 },
-      { text: 'Pete Sampras', aliases: ['sampras'], tier: 3 },
-      { text: 'Maria Sharapova', aliases: ['sharapova'], tier: 3 },
-      { text: 'Andy Murray', aliases: ['murray'], tier: 3 },
-      { text: 'Carlos Alcaraz', aliases: ['alcaraz'], tier: 3 },
-      { text: 'Steffi Graf', aliases: ['graf'], tier: 4 },
-      { text: 'John McEnroe', aliases: ['mcenroe'], tier: 4 },
-      { text: 'Billie Jean King', aliases: [], tier: 4 },
-      { text: 'Rod Laver', aliases: ['laver'], tier: 5 },
-      { text: 'Martina Navratilova', aliases: ['navratilova'], tier: 5 },
-      { text: 'Bjorn Borg', aliases: ['borg'], tier: 5 },
-      { text: 'Arthur Ashe', aliases: ['ashe'], tier: 5 },
-    ],
-  },
-  {
-    id: 'premier-league-clubs',
-    category: 'SPORTS',
-    prompt: 'Name an English Premier League club (any era)',
-    answers: [
-      { text: 'Manchester United', aliases: ['man united', 'man utd', 'man u'], tier: 1 },
-      { text: 'Liverpool', aliases: [], tier: 1 },
-      { text: 'Arsenal', aliases: [], tier: 1 },
-      { text: 'Chelsea', aliases: [], tier: 2 },
-      { text: 'Manchester City', aliases: ['man city'], tier: 2 },
-      { text: 'Tottenham', aliases: ['tottenham hotspur', 'spurs'], tier: 2 },
-      { text: 'Everton', aliases: [], tier: 3 },
-      { text: 'Newcastle', aliases: ['newcastle united'], tier: 3 },
-      { text: 'West Ham', aliases: ['west ham united'], tier: 3 },
-      { text: 'Aston Villa', aliases: ['villa'], tier: 3 },
-      { text: 'Leicester City', aliases: ['leicester'], tier: 4 },
-      { text: 'Southampton', aliases: [], tier: 4 },
-      { text: 'Leeds United', aliases: ['leeds'], tier: 4 },
-      { text: 'Brentford', aliases: [], tier: 5 },
-      { text: 'Bournemouth', aliases: ['afc bournemouth'], tier: 5 },
-      { text: 'Wolves', aliases: ['wolverhampton', 'wolverhampton wanderers'], tier: 5 },
-      { text: 'Brighton', aliases: ['brighton and hove albion', 'brighton hove albion'], tier: 5 },
-    ],
-  },
+
+// Share of a ranked list (most common first) that falls into T1, T1-T2, T1-T3, T1-T4.
+// Default: top 12% = T1, next 18% = T2, next 30% = T3, next 25% = T4, rarest 15% = T5.
+export const RARITY_CUTOFFS = [0.12, 0.3, 0.6, 0.85];
+
+export const CUSTOM_PROMPTS = [];
+
+export const RANKED_PROMPTS = [
+  // ---------------------------------------------------------------- GEOGRAPHY
+  { id: 'us-states', category: 'GEOGRAPHY', prompt: 'Name a US state', rankedBy: 'population, tourism and pop-culture prominence', ranked: ['California|cali', 'Texas', 'Florida', 'New York', 'Hawaii', 'Alaska', 'Washington', 'Illinois', 'Georgia', 'Ohio', 'Pennsylvania', 'Michigan', 'Arizona', 'Colorado', 'Nevada', 'North Carolina', 'New Jersey', 'Virginia', 'Massachusetts', 'Tennessee', 'Louisiana', 'Oregon', 'Utah', 'Kentucky', 'Alabama', 'Minnesota', 'Indiana', 'Missouri', 'South Carolina', 'Wisconsin', 'Oklahoma', 'Kansas', 'Maryland', 'Connecticut', 'Iowa', 'Mississippi', 'Arkansas', 'Nebraska', 'New Mexico', 'Idaho', 'Montana', 'Maine', 'West Virginia', 'New Hampshire', 'Vermont', 'Rhode Island', 'Delaware', 'Wyoming', 'South Dakota', 'North Dakota'] },
+  { id: 'africa-countries', category: 'GEOGRAPHY', prompt: 'Name a country in Africa', rankedBy: 'population, news coverage and tourism prominence', ranked: ['Egypt', 'South Africa', 'Nigeria', 'Kenya', 'Morocco', 'Ethiopia', 'Ghana', 'Algeria', 'Tanzania', 'Uganda', 'Zimbabwe', 'Somalia', 'Sudan', 'Libya', 'Tunisia', 'Rwanda', 'Senegal', 'Cameroon', 'Madagascar', 'Democratic Republic of the Congo|dr congo|drc|congo|congo kinshasa|zaire', 'Angola', 'Ivory Coast|cote divoire', 'Mozambique', 'Zambia', 'Namibia', 'Botswana', 'Mali', 'Niger', 'Chad', 'South Sudan', 'Liberia', 'Sierra Leone', 'Malawi', 'Burkina Faso', 'Republic of the Congo|congo brazzaville|congo republic', 'Gabon', 'Togo', 'Benin', 'Guinea', 'Mauritania', 'Eritrea', 'Djibouti', 'Gambia', 'Lesotho', 'Eswatini|swaziland', 'Burundi', 'Central African Republic|car', 'Cape Verde|cabo verde', 'Mauritius', 'Seychelles', 'Equatorial Guinea', 'Guinea-Bissau', 'Comoros', 'Sao Tome and Principe|sao tome'] },
+  { id: 'europe-countries', category: 'GEOGRAPHY', prompt: 'Name a country in Europe', rankedBy: 'population, tourism and news prominence', ranked: ['France', 'Germany', 'Italy', 'Spain', 'England', 'United Kingdom|uk|britain|great britain', 'Russia', 'Greece', 'Portugal', 'Ireland|republic of ireland|eire', 'Netherlands|holland', 'Switzerland', 'Sweden', 'Norway', 'Poland', 'Belgium', 'Austria', 'Denmark', 'Finland', 'Scotland', 'Ukraine', 'Iceland', 'Turkey|turkiye', 'Czech Republic|czechia', 'Hungary', 'Croatia', 'Wales', 'Romania', 'Serbia', 'Bulgaria', 'Northern Ireland', 'Luxembourg', 'Monaco', 'Slovakia', 'Slovenia', 'Belarus', 'Lithuania', 'Latvia', 'Estonia', 'Albania', 'Bosnia and Herzegovina|bosnia', 'Montenegro', 'Malta', 'Cyprus', 'North Macedonia|macedonia', 'Moldova', 'Andorra', 'Liechtenstein', 'San Marino', 'Vatican City|vatican|holy see', 'Kosovo'] },
+  { id: 'asia-countries', category: 'GEOGRAPHY', prompt: 'Name a country in Asia', rankedBy: 'population, economy and news prominence', ranked: ['China', 'Japan', 'India', 'South Korea|korea', 'Thailand', 'Vietnam', 'Philippines', 'Indonesia', 'North Korea', 'Pakistan', 'Iran', 'Iraq', 'Israel', 'Saudi Arabia', 'Afghanistan', 'Singapore', 'Malaysia', 'Nepal', 'United Arab Emirates|uae|emirates', 'Taiwan', 'Bangladesh', 'Sri Lanka', 'Mongolia', 'Qatar', 'Syria', 'Cambodia', 'Jordan', 'Lebanon', 'Kuwait', 'Myanmar|burma', 'Kazakhstan', 'Laos', 'Yemen', 'Oman', 'Maldives', 'Bhutan', 'Uzbekistan', 'Bahrain', 'Georgia', 'Armenia', 'Azerbaijan', 'Brunei', 'Kyrgyzstan', 'Tajikistan', 'Turkmenistan', 'Palestine', 'East Timor|timor leste'] },
+  { id: 'americas-countries', category: 'GEOGRAPHY', prompt: 'Name a country in North or South America', rankedBy: 'population, tourism and news prominence', ranked: ['United States|usa|us|america|united states of america', 'Canada', 'Mexico', 'Brazil', 'Argentina', 'Cuba', 'Jamaica', 'Colombia', 'Peru', 'Chile', 'Venezuela', 'Ecuador', 'Bolivia', 'Uruguay', 'Paraguay', 'Dominican Republic', 'Haiti', 'Costa Rica', 'Panama', 'Bahamas', 'Guatemala', 'Honduras', 'El Salvador', 'Nicaragua', 'Belize', 'Trinidad and Tobago|trinidad', 'Barbados', 'Guyana', 'Suriname', 'Grenada', 'Saint Lucia|st lucia', 'Antigua and Barbuda|antigua', 'Dominica', 'Saint Kitts and Nevis|st kitts', 'Saint Vincent and the Grenadines|st vincent'] },
+  { id: 'world-capitals', category: 'GEOGRAPHY', prompt: 'Name a capital city of any country', rankedBy: 'city fame (tourism, population, news mentions)', ranked: ['London', 'Paris', 'Tokyo', 'Washington, D.C.|washington dc|washington|dc', 'Rome', 'Beijing', 'Moscow', 'Madrid', 'Berlin', 'Ottawa', 'Canberra', 'Mexico City', 'Cairo', 'New Delhi|delhi', 'Athens', 'Dublin', 'Amsterdam', 'Seoul', 'Bangkok', 'Lisbon', 'Vienna', 'Brussels', 'Stockholm', 'Oslo', 'Copenhagen', 'Buenos Aires', 'Brasilia', 'Lima', 'Havana', 'Santiago', 'Bogota', 'Nairobi', 'Prague', 'Budapest', 'Warsaw', 'Helsinki', 'Bern', 'Ankara', 'Jerusalem', 'Tehran', 'Baghdad', 'Riyadh', 'Islamabad', 'Kabul', 'Hanoi', 'Manila', 'Jakarta', 'Kuala Lumpur', 'Singapore', 'Wellington', 'Caracas', 'Kyiv|kiev', 'Reykjavik', 'Quito', 'Montevideo', 'Kingston', 'Pretoria', 'Abuja', 'Addis Ababa', 'Bucharest', 'Belgrade', 'Sofia', 'Doha', 'Abu Dhabi', 'Kathmandu', 'Dhaka', 'Taipei', 'Ulaanbaatar', 'Accra', 'Rabat', 'Tunis', 'Algiers', 'Dakar', 'Kampala', 'Kigali', 'Harare', 'Luanda', 'Zagreb', 'Bratislava', 'Ljubljana', 'Vilnius', 'Riga', 'Tallinn', 'Valletta', 'Tbilisi', 'Yerevan', 'Baku', 'Astana', 'Tashkent', 'Thimphu', 'La Paz', 'Asuncion', 'Port-au-Prince', 'Nassau', 'Phnom Penh', 'Vientiane', 'Naypyidaw', 'Bishkek', 'Dushanbe', 'Ashgabat', 'Sucre'] },
+  { id: 'us-state-capitals', category: 'GEOGRAPHY', prompt: 'Name a US state capital', rankedBy: 'city size and national name recognition', ranked: ['Boston', 'Atlanta', 'Denver', 'Phoenix', 'Austin', 'Nashville', 'Honolulu', 'Sacramento', 'Salt Lake City', 'Indianapolis', 'Columbus', 'Oklahoma City', 'Albany', 'Tallahassee', 'Richmond', 'Raleigh', 'Boise', 'Santa Fe', 'Madison', 'Providence', 'Little Rock', 'Baton Rouge', 'Des Moines', 'Springfield', 'Saint Paul|st paul', 'Lincoln', 'Hartford', 'Trenton', 'Harrisburg', 'Annapolis', 'Juneau', 'Montgomery', 'Jackson', 'Charleston', 'Columbia', 'Lansing', 'Carson City', 'Cheyenne', 'Helena', 'Olympia', 'Salem', 'Frankfort', 'Topeka', 'Concord', 'Augusta', 'Dover', 'Bismarck', 'Pierre', 'Montpelier', 'Jefferson City'] },
+  { id: 'us-cities', category: 'GEOGRAPHY', prompt: 'Name a city in the United States', rankedBy: 'population plus tourism / pop-culture fame', ranked: ['New York City|new york|nyc', 'Los Angeles|la', 'Chicago', 'Miami', 'Las Vegas|vegas', 'San Francisco', 'Boston', 'Seattle', 'Houston', 'Dallas', 'Philadelphia|philly', 'Atlanta', 'Denver', 'Phoenix', 'Orlando', 'San Diego', 'Detroit', 'New Orleans', 'Washington, D.C.|washington dc|dc|washington', 'Austin', 'Nashville', 'Portland', 'Minneapolis', 'Baltimore', 'Cleveland', 'Pittsburgh', 'St. Louis|saint louis', 'Kansas City', 'Charlotte', 'Indianapolis', 'Milwaukee', 'Salt Lake City', 'Honolulu', 'San Antonio', 'Tampa', 'Cincinnati', 'Sacramento', 'San Jose', 'Columbus', 'Memphis', 'Buffalo', 'Oklahoma City', 'Albuquerque', 'Tucson', 'Raleigh', 'Omaha', 'Louisville', 'Jacksonville', 'Fort Worth', 'El Paso', 'Anchorage', 'Boise', 'Richmond', 'Birmingham', 'Tulsa', 'Spokane', 'Des Moines', 'Savannah', 'Charleston', 'Fresno', 'Reno', 'Little Rock', 'Madison', 'Providence', 'Hartford', 'Wichita', 'Lexington', 'Knoxville', 'Chattanooga', 'Fargo', 'Bozeman', 'Duluth'] },
+  { id: 'rivers', category: 'GEOGRAPHY', prompt: 'Name a river anywhere in the world', rankedBy: 'length, fame and how often it appears in school curricula', ranked: ['Nile', 'Amazon', 'Mississippi', 'Thames', 'Yangtze|chang jiang', 'Danube', 'Rhine', 'Ganges|ganga', 'Colorado', 'Missouri', 'Hudson', 'Seine', 'Rio Grande', 'Volga', 'Mekong', 'Tigris', 'Euphrates', 'Congo', 'Niger', 'Ohio', 'Zambezi', 'Columbia', 'Yellow River|huang he', 'Jordan', 'Tiber', 'Indus', 'Potomac', 'Yukon', 'St. Lawrence|saint lawrence', 'Loire', 'Elbe', 'Snake', 'Tennessee', 'Murray', 'Orinoco', 'Delaware', 'Arkansas', 'Red River', 'Shannon', 'Po', 'Douro', 'Ob', 'Lena', 'Yenisei', 'Amur', 'Dnieper', 'Mackenzie', 'Brahmaputra', 'Irrawaddy', 'Darling', 'Severn', 'Tagus', 'Vistula', 'Oder', 'Liffey', 'Susquehanna', 'Limpopo', 'Okavango'] },
+  { id: 'mountains', category: 'GEOGRAPHY', prompt: 'Name a famous mountain or volcano', rankedBy: 'name recognition (height records, landmarks, eruptions)', ranked: ['Mount Everest|everest', 'Mount Kilimanjaro|kilimanjaro', 'Mount Fuji|fuji', 'K2', 'Mount Rushmore|rushmore', 'Matterhorn', 'Mont Blanc', 'Mount Olympus|olympus', 'Mount St. Helens|st helens', 'Denali|mount mckinley', 'Mount Vesuvius|vesuvius', 'Mount Rainier|rainier', 'Mount Etna|etna', 'Pikes Peak', 'Mount Whitney|whitney', 'Table Mountain', 'Ben Nevis', 'Mount Sinai|sinai', 'Aconcagua', 'Mount Elbrus|elbrus', 'Kangchenjunga', 'Mount Hood', 'Half Dome', 'Mount Kenya', 'Eiger', 'Mount Shasta|shasta', 'Annapurna', 'Mount Ararat|ararat', 'Mount Cook|aoraki', 'Mauna Kea', 'Mauna Loa', 'Krakatoa', 'Mount Pinatubo|pinatubo', 'Stone Mountain', 'Mount Washington', 'Mount Kosciuszko|kosciuszko', 'Grand Teton', 'Mount Logan', 'Lhotse', 'Makalu', 'Nanga Parbat', 'Cho Oyu', 'Mount Erebus|erebus', 'Vinson Massif|mount vinson', 'Popocatepetl', 'Chimborazo', 'Cotopaxi', 'Mount Tambora|tambora', 'Puncak Jaya', 'Kirkjufell', 'Mount Roraima|roraima', 'Huascaran', 'Dhaulagiri'] },
+
+  // ------------------------------------------------------------------- SPORTS
+  { id: 'nfl-teams', category: 'SPORTS', prompt: 'Name an NFL team', rankedBy: 'fan base size, TV ratings and championships', ranked: ['Cowboys|dallas cowboys|dallas', 'Patriots|new england patriots|new england|pats', 'Packers|green bay packers|green bay', 'Steelers|pittsburgh steelers|pittsburgh', '49ers|niners|forty niners|san francisco 49ers|san francisco', 'Chiefs|kansas city chiefs|kansas city|kc chiefs', 'Eagles|philadelphia eagles|philadelphia|philly', 'Giants|new york giants|ny giants', 'Bears|chicago bears|chicago', 'Broncos|denver broncos|denver', 'Raiders|las vegas raiders|oakland raiders|las vegas|oakland', 'Seahawks|seattle seahawks|seattle', 'Dolphins|miami dolphins|miami', 'Jets|new york jets|ny jets', 'Ravens|baltimore ravens|baltimore', 'Vikings|minnesota vikings|minnesota', 'Saints|new orleans saints|new orleans', 'Bills|buffalo bills|buffalo', 'Rams|los angeles rams|la rams|st louis rams', 'Lions|detroit lions|detroit', 'Browns|cleveland browns|cleveland', 'Buccaneers|bucs|tampa bay buccaneers|tampa bay', 'Falcons|atlanta falcons|atlanta', 'Bengals|cincinnati bengals|cincinnati', 'Chargers|los angeles chargers|la chargers|san diego chargers', 'Colts|indianapolis colts|indianapolis', 'Commanders|washington commanders|redskins|washington football team|washington', 'Panthers|carolina panthers|carolina', 'Titans|tennessee titans|tennessee|oilers', 'Cardinals|arizona cardinals|arizona', 'Texans|houston texans|houston', 'Jaguars|jacksonville jaguars|jacksonville|jags'] },
+  { id: 'nba-teams', category: 'SPORTS', prompt: 'Name an NBA team', rankedBy: 'fan base size, championships and global merch sales', ranked: ['Lakers|los angeles lakers|la lakers', 'Bulls|chicago bulls', 'Celtics|boston celtics', 'Warriors|golden state warriors|golden state', 'Knicks|new york knicks', 'Heat|miami heat', 'Cavaliers|cavs|cleveland cavaliers', 'Spurs|san antonio spurs', 'Nets|brooklyn nets', 'Rockets|houston rockets', 'Mavericks|mavs|dallas mavericks', '76ers|sixers|philadelphia 76ers', 'Clippers|la clippers', 'Suns|phoenix suns', 'Thunder|okc thunder|oklahoma city thunder', 'Raptors|toronto raptors', 'Bucks|milwaukee bucks', 'Nuggets|denver nuggets', 'Pistons|detroit pistons', 'Magic|orlando magic', 'Trail Blazers|blazers|portland trail blazers', 'Jazz|utah jazz', 'Timberwolves|minnesota timberwolves', 'Hawks|atlanta hawks', 'Kings|sacramento kings', 'Pacers|indiana pacers', 'Grizzlies|memphis grizzlies', 'Pelicans|new orleans pelicans', 'Hornets|charlotte hornets', 'Wizards|washington wizards'] },
+  { id: 'mlb-teams', category: 'SPORTS', prompt: 'Name an MLB baseball team', rankedBy: 'fan base size, attendance and World Series history', ranked: ['Yankees|new york yankees|ny yankees', 'Red Sox|boston red sox', 'Dodgers|los angeles dodgers|la dodgers', 'Cubs|chicago cubs', 'Giants|san francisco giants|sf giants', 'Mets|new york mets', 'Cardinals|st louis cardinals', 'Braves|atlanta braves', 'Astros|houston astros', 'White Sox|chicago white sox', 'Phillies|philadelphia phillies', 'Tigers|detroit tigers', 'Angels|los angeles angels|anaheim angels', 'Mariners|seattle mariners', 'Blue Jays|toronto blue jays|jays', 'Rangers|texas rangers', 'Padres|san diego padres', 'Orioles|baltimore orioles', 'Pirates|pittsburgh pirates', 'Reds|cincinnati reds', 'Twins|minnesota twins', 'Brewers|milwaukee brewers', 'Royals|kansas city royals', 'Guardians|cleveland guardians|indians|cleveland indians', 'Marlins|miami marlins', 'Rockies|colorado rockies', 'Diamondbacks|dbacks|arizona diamondbacks', 'Rays|tampa bay rays', 'Athletics|oakland athletics|as', 'Nationals|nats|washington nationals'] },
+  { id: 'premier-league-clubs', category: 'SPORTS', prompt: 'Name a club that has played in the English Premier League', rankedBy: 'global fan base, titles and seasons spent in the top flight', ranked: ['Manchester United|man united|man utd|man u', 'Liverpool', 'Arsenal', 'Chelsea', 'Manchester City|man city', 'Tottenham|tottenham hotspur|spurs', 'Everton', 'Newcastle|newcastle united', 'West Ham|west ham united', 'Aston Villa|villa', 'Leicester City|leicester', 'Leeds United|leeds', 'Southampton', 'Wolves|wolverhampton|wolverhampton wanderers', 'Brighton|brighton and hove albion', 'Crystal Palace|palace', 'Fulham', 'Nottingham Forest|forest', 'Sunderland', 'Blackburn Rovers|blackburn', 'Middlesbrough|boro', 'Bournemouth|afc bournemouth', 'Burnley', 'Brentford', 'Stoke City|stoke', 'Norwich City|norwich', 'Watford', 'West Brom|west bromwich albion', 'Bolton Wanderers|bolton', 'Wigan Athletic|wigan', 'Swansea City|swansea', 'Ipswich Town|ipswich', 'Charlton Athletic|charlton', 'Portsmouth', 'Sheffield United', 'Hull City|hull', 'Birmingham City|birmingham', 'Queens Park Rangers|qpr', 'Cardiff City|cardiff', 'Derby County|derby', 'Reading', 'Coventry City|coventry', 'Wimbledon', 'Blackpool', 'Huddersfield Town|huddersfield', 'Luton Town|luton', 'Sheffield Wednesday', 'Oldham Athletic|oldham', 'Barnsley', 'Bradford City|bradford', 'Swindon Town|swindon'] },
+  { id: 'euro-clubs', category: 'SPORTS', prompt: 'Name a European soccer club that is NOT English', rankedBy: 'global fan base, European trophies and social following', ranked: ['Real Madrid', 'Barcelona|barca', 'Bayern Munich|bayern', 'Juventus|juve', 'Paris Saint-Germain|psg|paris saint germain', 'AC Milan|milan', 'Inter Milan|inter', 'Borussia Dortmund|dortmund|bvb', 'Ajax', 'Atletico Madrid|atletico', 'Benfica', 'Porto', 'Celtic', 'Rangers', 'Roma|as roma', 'Napoli', 'Lazio', 'Marseille|olympique marseille', 'Lyon|olympique lyonnais', 'Sevilla', 'Valencia', 'Bayer Leverkusen|leverkusen', 'RB Leipzig|leipzig', 'Schalke', 'PSV Eindhoven|psv', 'Feyenoord', 'Galatasaray', 'Fenerbahce', 'Monaco|as monaco', 'Sporting CP|sporting lisbon|sporting', 'Villarreal', 'Atalanta', 'Fiorentina', 'Olympiacos', 'Besiktas', 'Shakhtar Donetsk|shakhtar', 'Dynamo Kyiv|dynamo kiev', 'Red Star Belgrade|crvena zvezda', 'Anderlecht', 'Club Brugge|brugge', 'Basel|fc basel', 'Real Sociedad', 'Athletic Bilbao|athletic club', 'Eintracht Frankfurt|frankfurt', 'Wolfsburg', 'Lille', 'Nice|ogc nice', 'Red Bull Salzburg|salzburg', 'FC Copenhagen|copenhagen', 'Zenit Saint Petersburg|zenit'] },
+  { id: 'tennis-players', category: 'SPORTS', prompt: 'Name a famous tennis player (past or present)', rankedBy: 'Grand Slam titles plus mainstream media fame', ranked: ['Serena Williams|serena', 'Roger Federer|federer', 'Rafael Nadal|nadal|rafa|rafa nadal', 'Novak Djokovic|djokovic|novak', 'Venus Williams|venus', 'Andre Agassi|agassi', 'Pete Sampras|sampras', 'John McEnroe|mcenroe', 'Maria Sharapova|sharapova', 'Andy Murray|murray', 'Carlos Alcaraz|alcaraz', 'Steffi Graf|graf', 'Billie Jean King', 'Bjorn Borg|borg', 'Martina Navratilova|navratilova', 'Jannik Sinner|sinner', 'Chris Evert|evert', 'Naomi Osaka|osaka', 'Arthur Ashe|ashe', 'Coco Gauff|gauff', 'Jimmy Connors|connors', 'Boris Becker|becker', 'Rod Laver|laver', 'Monica Seles|seles', 'Martina Hingis|hingis', 'Andy Roddick|roddick', 'Iga Swiatek|swiatek', 'Stan Wawrinka|wawrinka', 'Kim Clijsters|clijsters', 'Justine Henin|henin', 'Ivan Lendl|lendl', 'Lleyton Hewitt|hewitt', 'Aryna Sabalenka|sabalenka', 'Daniil Medvedev|medvedev', 'Stefan Edberg|edberg', 'Emma Raducanu|raducanu', 'Caroline Wozniacki|wozniacki', 'Juan Martin del Potro|del potro', 'Nick Kyrgios|kyrgios', 'Alexander Zverev|zverev', 'Li Na', 'Margaret Court', 'Ken Rosewall|rosewall', 'Gabriela Sabatini|sabatini', 'Goran Ivanisevic|ivanisevic', 'Marat Safin|safin', 'Petra Kvitova|kvitova', 'Ashleigh Barty|ash barty|barty'] },
+  { id: 'nba-players', category: 'SPORTS', prompt: 'Name an NBA player (past or present)', rankedBy: 'career accolades plus mainstream celebrity', ranked: ['Michael Jordan|jordan|mj', 'LeBron James|lebron', 'Kobe Bryant|kobe', "Shaquille O'Neal|shaq", 'Stephen Curry|steph curry|curry', 'Magic Johnson|magic', 'Larry Bird', 'Kevin Durant|durant|kd', 'Kareem Abdul-Jabbar|kareem', 'Wilt Chamberlain|chamberlain|wilt', 'Tim Duncan|duncan', 'Dennis Rodman|rodman', 'Allen Iverson|iverson', 'Dwyane Wade|dwayne wade', 'Giannis Antetokounmpo|giannis', 'Dirk Nowitzki|dirk|nowitzki', 'Scottie Pippen|pippen', 'Kawhi Leonard|kawhi', 'Hakeem Olajuwon|hakeem|olajuwon', 'Charles Barkley|barkley', 'Bill Russell', 'Nikola Jokic|jokic', 'Luka Doncic|luka|doncic', 'James Harden|harden', 'Russell Westbrook|westbrook', 'Kevin Garnett|garnett', 'Kyrie Irving|kyrie', 'Steve Nash|nash', 'Yao Ming', 'Chris Paul|cp3', 'Carmelo Anthony|carmelo|melo', 'Paul Pierce', 'Patrick Ewing|ewing', 'Vince Carter', 'Ray Allen', 'Tracy McGrady|mcgrady|tmac', 'Klay Thompson|klay', 'Anthony Davis', 'Jayson Tatum|tatum', 'Joel Embiid|embiid', 'Damian Lillard|lillard', 'Victor Wembanyama|wembanyama|wemby', 'John Stockton|stockton', 'Karl Malone', 'Reggie Miller', 'Isiah Thomas', 'Jerry West', 'Julius Erving|dr j', 'Oscar Robertson', 'Pete Maravich|pistol pete', 'David Robinson', 'Ja Morant|morant', 'Jimmy Butler', 'Moses Malone', 'Bob Cousy|cousy', 'Elgin Baylor|baylor'] },
+  { id: 'soccer-players', category: 'SPORTS', prompt: 'Name a soccer player (past or present)', rankedBy: 'Ballon d’Or record, transfer fame and social following', ranked: ['Lionel Messi|messi|leo messi', 'Cristiano Ronaldo|cristiano|cr7|ronaldo', 'Pele', 'Diego Maradona|maradona', 'Neymar', 'Kylian Mbappe|mbappe', 'David Beckham|beckham', 'Zinedine Zidane|zidane', 'Ronaldinho', 'Erling Haaland|haaland', 'Mohamed Salah|salah', 'Wayne Rooney|rooney', 'Thierry Henry|henry', 'Zlatan Ibrahimovic|zlatan|ibrahimovic', 'Ronaldo Nazario|r9|brazilian ronaldo', 'Kaka', 'Luka Modric|modric', 'Robert Lewandowski|lewandowski', 'Harry Kane|kane', 'Johan Cruyff|cruyff', 'Franz Beckenbauer|beckenbauer', 'Andres Iniesta|iniesta', 'Xavi', 'Gianluigi Buffon|buffon', 'Paolo Maldini|maldini', 'Karim Benzema|benzema', 'Kevin De Bruyne|de bruyne|kdb', 'Luis Suarez|suarez', 'Didier Drogba|drogba', 'Steven Gerrard|gerrard', 'Frank Lampard|lampard', 'Gareth Bale|bale', 'Eden Hazard|hazard', 'Sergio Ramos|ramos', 'Iker Casillas|casillas', 'Andrea Pirlo|pirlo', 'Francesco Totti|totti', 'Manuel Neuer|neuer', 'Vinicius Junior|vinicius|vini jr', 'Jude Bellingham|bellingham', 'Son Heung-min|son', 'Eusebio', 'Ferenc Puskas|puskas', 'Michel Platini|platini', 'Marco van Basten|van basten', 'Luis Figo|figo', 'Eric Cantona|cantona', 'Alan Shearer|shearer', 'Paul Pogba|pogba', "N'Golo Kante|kante", 'Thomas Muller|muller|mueller', 'Toni Kroos|kroos', 'Rivaldo', 'Romario', 'Roberto Baggio|baggio', 'Alessandro Del Piero|del piero', 'George Weah|weah', "Samuel Eto'o|etoo", 'Lev Yashin|yashin', 'Lamine Yamal|yamal'] },
+  { id: 'nfl-quarterbacks', category: 'SPORTS', prompt: 'Name an NFL quarterback (past or present)', rankedBy: 'Super Bowl wins, records and media fame', ranked: ['Tom Brady|brady', 'Peyton Manning|peyton', 'Patrick Mahomes|mahomes', 'Aaron Rodgers|rodgers', 'Joe Montana|montana', 'Brett Favre|favre', 'Dan Marino|marino', 'John Elway|elway', 'Drew Brees|brees', 'Eli Manning|eli', 'Josh Allen', 'Lamar Jackson|lamar', 'Joe Burrow|burrow', 'Russell Wilson', 'Ben Roethlisberger|roethlisberger|big ben', 'Troy Aikman|aikman', 'Terry Bradshaw|bradshaw', 'Steve Young', 'Joe Namath|namath|broadway joe', 'Michael Vick|vick', 'Cam Newton', 'Jalen Hurts|hurts', 'Dak Prescott|dak|prescott', 'Matt Ryan', 'Philip Rivers|rivers', 'Kurt Warner', 'Johnny Unitas|unitas', 'Tony Romo|romo', 'Joe Flacco|flacco', 'Jim Kelly', 'Warren Moon', 'Fran Tarkenton|tarkenton', 'Bart Starr', 'Roger Staubach|staubach', 'Matthew Stafford|stafford', 'Kirk Cousins|cousins', 'Justin Herbert|herbert', 'C.J. Stroud|stroud', 'Tua Tagovailoa|tua', 'Baker Mayfield|mayfield', 'Jared Goff|goff', 'Trevor Lawrence', 'Tim Tebow|tebow', 'Doug Flutie|flutie', 'Randall Cunningham', 'Steve McNair|mcnair', 'Donovan McNabb|mcnabb', 'Ken Stabler|kenny stabler|stabler', 'Dan Fouts|fouts', 'Sid Luckman|luckman'] },
+  { id: 'golfers', category: 'SPORTS', prompt: 'Name a professional golfer', rankedBy: 'major titles plus mainstream fame', ranked: ['Tiger Woods|tiger', 'Jack Nicklaus|nicklaus', 'Arnold Palmer|palmer', 'Phil Mickelson|mickelson', 'Rory McIlroy|mcilroy|rory', 'Scottie Scheffler|scheffler', 'Jordan Spieth|spieth', 'Gary Player', 'Bubba Watson|bubba', 'Dustin Johnson', 'Brooks Koepka|koepka', 'Bryson DeChambeau|dechambeau|bryson', 'Seve Ballesteros|seve|ballesteros', 'Ben Hogan|hogan', 'Sergio Garcia', 'Annika Sorenstam|annika|sorenstam', 'Ernie Els', 'Vijay Singh', 'Jon Rahm|rahm', 'Justin Thomas', 'Rickie Fowler|fowler', 'Greg Norman', 'Lee Trevino|trevino', 'Nelly Korda|korda', 'Tom Watson', 'Bobby Jones', 'Sam Snead|snead', 'Nick Faldo|faldo', 'Xander Schauffele|schauffele', 'Fred Couples|couples', 'Collin Morikawa|morikawa', 'Payne Stewart', 'Lorena Ochoa|ochoa', 'Lydia Ko', 'Hideki Matsuyama|matsuyama', 'Padraig Harrington|harrington'] },
+  { id: 'olympic-summer', category: 'SPORTS', prompt: 'Name a Summer Olympic sport or event', rankedBy: 'US/UK TV viewership of Olympic events', ranked: ['Swimming', 'Track and Field|athletics|track|running', 'Gymnastics', 'Basketball', 'Soccer|football', 'Tennis', 'Boxing', 'Volleyball', 'Diving', 'Cycling', 'Wrestling', 'Beach Volleyball', 'Rowing', 'Fencing', 'Weightlifting', 'Archery', 'Judo', 'Taekwondo', 'Golf', 'Equestrian|horse riding|show jumping|dressage', 'Sailing', 'Water Polo', 'Table Tennis|ping pong', 'Badminton', 'Shooting', 'Field Hockey|hockey', 'Handball', 'Rugby Sevens|rugby', 'Triathlon', 'Skateboarding', 'Surfing', 'Sport Climbing|climbing|rock climbing', 'Canoeing|canoe|kayaking|canoe slalom', 'Artistic Swimming|synchronized swimming', 'Trampoline', 'BMX', 'Marathon', 'Breaking|breakdancing', 'Decathlon', 'Heptathlon', 'Rhythmic Gymnastics', 'Modern Pentathlon|pentathlon'] },
+  { id: 'winter-sports', category: 'SPORTS', prompt: 'Name a Winter Olympic sport or event', rankedBy: 'US/Canada TV viewership of Winter Olympic events', ranked: ['Skiing', 'Ice Hockey|hockey', 'Figure Skating', 'Snowboarding', 'Bobsled|bobsleigh', 'Curling', 'Speed Skating', 'Luge', 'Ski Jumping', 'Alpine Skiing|downhill skiing', 'Biathlon', 'Skeleton', 'Cross-Country Skiing', 'Freestyle Skiing', 'Short Track', 'Halfpipe', 'Moguls', 'Slalom', 'Downhill', 'Giant Slalom', 'Ice Dancing', 'Super-G', 'Aerials', 'Nordic Combined', 'Big Air', 'Slopestyle', 'Ski Cross', 'Snowboard Cross', 'Team Pursuit', 'Mass Start', 'Parallel Giant Slalom', 'Ski Mountaineering'] },
+  { id: 'ball-sports', category: 'SPORTS', prompt: 'Name a sport played with a ball', rankedBy: 'worldwide participation and TV audience', ranked: ['Soccer|football', 'Basketball', 'American Football', 'Baseball', 'Tennis', 'Golf', 'Volleyball', 'Rugby', 'Cricket', 'Bowling', 'Table Tennis|ping pong', 'Softball', 'Dodgeball', 'Handball', 'Water Polo', 'Lacrosse', 'Field Hockey', 'Squash', 'Pickleball', 'Racquetball', 'Kickball', 'Billiards|pool|snooker', 'Polo', 'Netball', 'Beach Volleyball', 'Futsal', 'Croquet', 'Bocce', 'Padel', 'Australian Rules Football|aussie rules|afl', 'Gaelic Football', 'Hurling', 'Wiffle Ball', 'Four Square', 'Tetherball', 'Petanque', 'Sepak Takraw', 'Jai Alai', 'Korfball', 'Goalball'] },
+
+  // --------------------------------------------------------------------- FOOD
+  { id: 'fruits', category: 'FOOD', prompt: 'Name a fruit', rankedBy: 'US grocery sales volume and everyday familiarity', ranked: ['Apple', 'Banana', 'Orange', 'Strawberry', 'Grape', 'Watermelon', 'Mango', 'Pineapple', 'Peach', 'Cherry', 'Pear', 'Blueberry', 'Lemon', 'Kiwi', 'Raspberry', 'Plum', 'Lime', 'Cantaloupe', 'Coconut', 'Grapefruit', 'Pomegranate', 'Papaya', 'Apricot', 'Avocado', 'Blackberry', 'Honeydew', 'Tangerine', 'Clementine', 'Nectarine', 'Cranberry', 'Fig', 'Passion Fruit', 'Dragon Fruit|pitaya', 'Guava', 'Lychee|litchi', 'Date', 'Tomato', 'Mandarin', 'Persimmon', 'Starfruit|carambola', 'Jackfruit', 'Durian', 'Gooseberry', 'Kumquat', 'Quince', 'Rambutan', 'Elderberry', 'Mulberry', 'Boysenberry', 'Plantain', 'Olive', 'Acai', 'Yuzu', 'Mangosteen', 'Loquat', 'Huckleberry', 'Tamarind', 'Breadfruit', 'Ugli Fruit', 'Cloudberry', 'Salak|snake fruit', 'Feijoa'] },
+  { id: 'vegetables', category: 'FOOD', prompt: 'Name a vegetable', rankedBy: 'US grocery sales volume and everyday familiarity', ranked: ['Carrot', 'Broccoli', 'Potato', 'Lettuce', 'Tomato', 'Onion', 'Corn', 'Cucumber', 'Spinach', 'Celery', 'Bell Pepper|pepper', 'Peas|pea', 'Green Beans|string beans', 'Cabbage', 'Cauliflower', 'Mushroom', 'Zucchini|courgette', 'Garlic', 'Sweet Potato|yam', 'Asparagus', 'Eggplant|aubergine', 'Kale', 'Brussels Sprouts|brussel sprouts', 'Pumpkin', 'Beet|beetroot', 'Radish', 'Squash', 'Artichoke', 'Avocado', 'Okra', 'Leek', 'Turnip', 'Bok Choy|pak choi', 'Arugula|rocket', 'Parsnip', 'Jalapeno', 'Chickpeas|garbanzo', 'Edamame', 'Shallot', 'Scallion|green onion|spring onion', 'Collard Greens|collards', 'Swiss Chard|chard', 'Rutabaga|swede', 'Fennel', 'Watercress', 'Kohlrabi', 'Daikon', 'Jicama', 'Endive', 'Radicchio', 'Taro', 'Cassava|yuca', 'Lotus Root', 'Bamboo Shoots', 'Fiddlehead', 'Salsify', 'Romanesco'] },
+  { id: 'pizza-toppings', category: 'FOOD', prompt: 'Name a pizza topping', rankedBy: 'US pizza-chain topping order data and polls', ranked: ['Pepperoni', 'Cheese|mozzarella', 'Mushrooms', 'Sausage', 'Pineapple', 'Onions', 'Olives|black olives', 'Bacon', 'Ham', 'Green Peppers|peppers|bell peppers', 'Chicken', 'Jalapenos', 'Spinach', 'Tomatoes', 'Ground Beef|beef', 'Anchovies', 'Garlic', 'Basil', 'Salami', 'Extra Cheese', 'BBQ Chicken', 'Meatballs', 'Artichoke', 'Feta', 'Prosciutto', 'Sun-Dried Tomatoes', 'Red Onion', 'Arugula', 'Ricotta', 'Chorizo', 'Banana Peppers', 'Pesto', 'Parmesan', 'Buffalo Chicken', 'Shrimp', 'Goat Cheese', 'Egg', 'Truffle', 'Capers', 'Corn', 'Eggplant', 'Potato', 'Figs', 'Clams'] },
+  { id: 'cheeses', category: 'FOOD', prompt: 'Name a type of cheese', rankedBy: 'US cheese consumption by variety', ranked: ['Cheddar', 'Mozzarella', 'Swiss', 'Parmesan|parmigiano reggiano', 'American', 'Brie', 'Feta', 'Gouda', 'Provolone', 'Pepper Jack', 'Blue Cheese|blue', 'Colby Jack|colby', 'Monterey Jack', 'Cream Cheese', 'Ricotta', 'Camembert', 'Goat Cheese|chevre', 'Muenster', 'Havarti', 'Gruyere', 'Cottage Cheese', 'Romano|pecorino romano', 'Halloumi', 'Mascarpone', 'Manchego', 'Gorgonzola', 'Roquefort', 'Emmental', 'Stilton', 'Paneer', 'Burrata', 'Asiago', 'Fontina', 'Edam', 'Queso Fresco', 'Limburger', 'Jarlsberg', 'Taleggio', 'Raclette', 'Comte', 'Wensleydale', 'Red Leicester', 'Oaxaca', 'Cotija', 'Port Salut', 'Boursin'] },
+  { id: 'fast-food', category: 'FOOD', prompt: 'Name a fast food chain', rankedBy: 'US system-wide sales and store count', ranked: ["McDonald's|mcdonalds|mcd", 'Burger King', "Wendy's", 'Taco Bell', 'KFC|kentucky fried chicken', 'Subway', 'Chick-fil-A', 'Pizza Hut', "Domino's", 'Starbucks', "Dunkin'|dunkin donuts", 'In-N-Out', 'Chipotle', 'Popeyes', 'Five Guys', "Arby's", 'Sonic', 'Dairy Queen|dq', 'Jack in the Box', "Papa John's", 'Panda Express', 'Shake Shack', 'Whataburger', "Carl's Jr.", "Hardee's", 'Little Caesars', 'White Castle', 'Panera Bread|panera', 'Wingstop', "Culver's", "Jimmy John's", "Raising Cane's|canes", 'Del Taco', "Long John Silver's", 'Quiznos', 'Checkers', 'Krispy Kreme', 'Tim Hortons', "Jersey Mike's", 'Firehouse Subs', 'Bojangles', "Church's Chicken|churchs", 'El Pollo Loco', "Zaxby's", "Steak 'n Shake", 'Wienerschnitzel', 'A&W', "Freddy's", 'Qdoba', "Moe's", 'Smashburger', 'Jollibee'] },
+  { id: 'candy', category: 'FOOD', prompt: 'Name a candy or chocolate bar', rankedBy: 'US candy sales rankings', ranked: ['Snickers', "M&M's|m and ms|mms", "Reese's|reeses peanut butter cups", 'Kit Kat', "Hershey's|hershey bar", 'Skittles', 'Twix', 'Starburst', 'Milky Way', 'Butterfinger', 'Sour Patch Kids', 'Jolly Rancher', 'Nerds', 'Twizzlers', 'Gummy Bears', 'Tootsie Roll', 'Swedish Fish', 'Almond Joy', '3 Musketeers|three musketeers', 'Lollipop', 'Candy Corn', "Hershey's Kisses|kisses", 'Laffy Taffy', 'Airheads', 'Mounds', 'Baby Ruth', 'Life Savers', 'Junior Mints', 'Whoppers', 'Milk Duds', 'Payday', 'Warheads', 'Smarties', 'Ferrero Rocher', 'Toblerone', 'Peeps', 'Jelly Beans', 'Cadbury Creme Egg|creme egg', 'Haribo', 'Pop Rocks', 'Mike and Ike', 'Hot Tamales', 'Heath', 'Rolo', 'Lindt', "Werther's", 'Dots', 'Good & Plenty', 'Charleston Chew', 'Bit-O-Honey', 'Zagnut', 'Necco Wafers', 'Chunky', 'Whatchamacallit', 'Mr. Goodbar', 'Cow Tales'] },
+  { id: 'spices', category: 'FOOD', prompt: 'Name a spice or herb', rankedBy: 'US spice-aisle sales and recipe frequency', ranked: ['Salt', 'Black Pepper|pepper', 'Garlic', 'Cinnamon', 'Oregano', 'Basil', 'Paprika', 'Cumin', 'Ginger', 'Chili Powder', 'Rosemary', 'Thyme', 'Parsley', 'Nutmeg', 'Turmeric', 'Cilantro|coriander', 'Bay Leaf', 'Mint', 'Dill', 'Cayenne', 'Onion Powder', 'Curry Powder|curry', 'Sage', 'Vanilla', 'Cloves', 'Garlic Powder', 'Red Pepper Flakes|chili flakes', 'Allspice', 'Cardamom', 'Chives', 'Saffron', 'Mustard Seed|mustard', 'Fennel', 'Tarragon', 'Star Anise|anise', 'Marjoram', 'Sesame', 'Lemongrass', 'Celery Salt', 'Mace', 'Fenugreek', 'Sumac', "Za'atar", 'Garam Masala', 'Caraway', 'Juniper', 'Lavender', 'Chervil', 'Asafoetida', 'Galangal', 'Annatto', 'Savory'] },
+  { id: 'ice-cream', category: 'FOOD', prompt: 'Name an ice cream flavor', rankedBy: 'US flavor sales and popularity polls', ranked: ['Chocolate', 'Vanilla', 'Strawberry', 'Cookies and Cream|cookies n cream', 'Mint Chocolate Chip|mint chip|mint', 'Cookie Dough', 'Rocky Road', 'Butter Pecan', 'Neapolitan', 'Coffee', 'Pistachio', 'Chocolate Chip', 'Rainbow Sherbet|sherbet', 'Salted Caramel|caramel', 'Birthday Cake|cake batter', 'Moose Tracks', 'Cherry Garcia|cherry', 'Peanut Butter', 'Coconut', 'Mango', 'Rum Raisin', 'Black Raspberry', 'Banana', 'Lemon', 'French Vanilla', 'Dulce de Leche', 'Green Tea|matcha', 'Spumoni', 'Tutti Frutti', 'Peach', 'Pralines and Cream', 'Bubblegum', 'Cotton Candy', 'Ube', 'Maple Walnut', 'Toffee', 'Cinnamon', 'Black Sesame', 'Stracciatella', 'Red Bean', 'Honey Lavender|lavender'] },
+  { id: 'pasta', category: 'FOOD', prompt: 'Name a type of pasta', rankedBy: 'US pasta shape sales and menu frequency', ranked: ['Spaghetti', 'Penne', 'Macaroni', 'Fettuccine', 'Lasagna', 'Ravioli', 'Linguine', 'Rigatoni', 'Farfalle|bowtie|bow tie', 'Rotini', 'Tortellini', 'Ziti', 'Angel Hair|capellini', 'Gnocchi', 'Orzo', 'Fusilli', 'Shells|conchiglie', 'Manicotti', 'Cannelloni', 'Orecchiette', 'Pappardelle', 'Tagliatelle', 'Bucatini', 'Ditalini', 'Cavatappi', 'Vermicelli', 'Gemelli', 'Rotelle|wagon wheels', 'Campanelle', 'Radiatori', 'Paccheri', 'Cavatelli', 'Stelline', 'Acini di Pepe', 'Trofie', 'Strozzapreti', 'Mafaldine', 'Casarecce', 'Anelli', 'Garganelli', 'Lumache'] },
+  { id: 'breads', category: 'FOOD', prompt: 'Name a type of bread', rankedBy: 'US bakery sales and menu frequency', ranked: ['White Bread', 'Whole Wheat|wheat', 'Sourdough', 'Rye', 'Bagel', 'Croissant', 'Baguette', 'Pita', 'Tortilla', 'Brioche', 'Ciabatta', 'Naan', 'Focaccia', 'Cornbread', 'Biscuit', 'English Muffin', 'Pretzel', 'Multigrain', 'Pumpernickel', 'Challah', 'Banana Bread', 'Garlic Bread', 'Dinner Roll|roll', 'Hawaiian Roll', 'Flatbread', 'Hot Dog Bun|bun', 'Soda Bread', 'Matzo', 'Lavash', 'Chapati|roti', 'Bao', 'Injera', 'Arepa', 'Crumpet', 'Paratha', 'Fougasse', 'Stollen', 'Pandesal', 'Pan Dulce', 'Lefse', 'Damper'] },
+
+  // ------------------------------------------------------------------ ANIMALS
+  { id: 'dog-breeds', category: 'ANIMALS', prompt: 'Name a breed of dog', rankedBy: 'American Kennel Club registration rankings', ranked: ['Labrador Retriever|labrador|lab', 'Golden Retriever|golden', 'German Shepherd|alsatian', 'Poodle', 'Bulldog|english bulldog', 'Beagle', 'Chihuahua', 'Husky|siberian husky', 'Pug', 'Dachshund|wiener dog|sausage dog', 'Rottweiler', 'Pit Bull|pitbull|american pit bull terrier', 'Boxer', 'Shih Tzu', 'Yorkshire Terrier|yorkie', 'French Bulldog|frenchie', 'Great Dane', 'Corgi|welsh corgi', 'Border Collie', 'Doberman|doberman pinscher', 'Pomeranian', 'Maltese', 'Dalmatian', 'Australian Shepherd|aussie', 'Cocker Spaniel', 'Bichon Frise', 'Saint Bernard|st bernard', 'Bernese Mountain Dog|bernese', 'Shiba Inu|shiba', 'Collie|rough collie', 'Greyhound', 'Cavalier King Charles Spaniel|cavalier', 'Boston Terrier', 'Schnauzer', 'Bloodhound', 'Mastiff', 'Jack Russell Terrier|jack russell', 'Newfoundland', 'Akita', 'Basset Hound', 'Samoyed', 'Great Pyrenees', 'Chow Chow', 'Weimaraner', 'Vizsla', 'Bull Terrier', 'Whippet', 'Pekingese', 'Papillon', 'Shar Pei', 'Afghan Hound', 'Irish Setter', 'Labradoodle', 'Goldendoodle', 'Cane Corso', 'Alaskan Malamute|malamute', 'Havanese', 'Lhasa Apso', 'Scottish Terrier|scottie', 'West Highland Terrier|westie', 'Basenji', 'Rhodesian Ridgeback', 'Belgian Malinois|malinois', 'Bullmastiff', 'German Shorthaired Pointer|pointer', 'Borzoi', 'Keeshond', 'Xoloitzcuintli|xolo', 'Komondor', 'Puli', 'Bedlington Terrier', 'Otterhound', 'Azawakh', 'Lagotto Romagnolo'] },
+  { id: 'mammals', category: 'ANIMALS', prompt: 'Name a mammal', rankedBy: 'how often the animal appears in children’s books, zoos and everyday speech', ranked: ['Dog', 'Cat', 'Lion', 'Elephant', 'Tiger', 'Horse', 'Cow', 'Bear', 'Monkey', 'Giraffe', 'Whale', 'Dolphin', 'Pig', 'Human', 'Wolf', 'Zebra', 'Rabbit|bunny', 'Mouse', 'Gorilla', 'Kangaroo', 'Deer', 'Fox', 'Bat', 'Sheep', 'Goat', 'Rat', 'Squirrel', 'Cheetah', 'Panda', 'Koala', 'Hippopotamus|hippo', 'Rhinoceros|rhino', 'Leopard', 'Chimpanzee|chimp', 'Camel', 'Polar Bear', 'Otter', 'Raccoon', 'Hamster', 'Beaver', 'Moose', 'Seal', 'Skunk', 'Donkey', 'Llama', 'Sloth', 'Hedgehog', 'Bison|buffalo', 'Orangutan', 'Jaguar', 'Porcupine', 'Walrus', 'Opossum|possum', 'Armadillo', 'Hyena', 'Lemur', 'Badger', 'Meerkat', 'Platypus', 'Mole', 'Gerbil', 'Guinea Pig', 'Ferret', 'Alpaca', 'Anteater', 'Weasel', 'Lynx', 'Puma|cougar|mountain lion', 'Antelope', 'Elk', 'Yak', 'Manatee', 'Wombat', 'Chinchilla', 'Mongoose', 'Tapir', 'Okapi', 'Narwhal', 'Aardvark', 'Pangolin', 'Wolverine', 'Capybara', 'Gazelle', 'Warthog', 'Wildebeest|gnu', 'Ocelot', 'Caracal', 'Dugong', 'Echidna', 'Tasmanian Devil', 'Marmot', 'Quokka', 'Numbat', 'Saiga', 'Fossa', 'Aye-aye', 'Binturong'] },
+  { id: 'birds', category: 'ANIMALS', prompt: 'Name a bird', rankedBy: 'how often the bird appears in children’s books, zoos and everyday speech', ranked: ['Eagle', 'Parrot', 'Owl', 'Robin', 'Pigeon', 'Penguin', 'Crow', 'Chicken', 'Flamingo', 'Hawk', 'Duck', 'Blue Jay', 'Cardinal', 'Seagull|gull', 'Ostrich', 'Swan', 'Hummingbird', 'Peacock|peafowl', 'Turkey', 'Sparrow', 'Falcon', 'Pelican', 'Woodpecker', 'Goose', 'Raven', 'Toucan', 'Vulture', 'Dove', 'Emu', 'Canary', 'Stork', 'Heron', 'Bald Eagle', 'Kiwi', 'Parakeet|budgie', 'Magpie', 'Finch', 'Cockatoo', 'Crane', 'Starling', 'Macaw', 'Albatross', 'Puffin', 'Kingfisher', 'Condor', 'Oriole', 'Mockingbird', 'Quail', 'Pheasant', 'Roadrunner', 'Egret', 'Swallow', 'Blackbird', 'Osprey', 'Cuckoo', 'Lark', 'Wren', 'Nightingale', 'Ibis', 'Kookaburra', 'Cassowary', 'Bluebird', 'Loon', 'Sandpiper', 'Grouse', 'Hornbill', 'Kestrel', 'Warbler', 'Cormorant', 'Shoebill', 'Nuthatch', 'Spoonbill', 'Lyrebird', 'Hoopoe', 'Kakapo', 'Quetzal', 'Frigatebird'] },
+  { id: 'sea-creatures', category: 'ANIMALS', prompt: 'Name an animal that lives in the ocean', rankedBy: 'aquarium popularity and how often it appears in media', ranked: ['Shark', 'Whale', 'Dolphin', 'Octopus', 'Jellyfish', 'Starfish|sea star', 'Crab', 'Lobster', 'Shrimp', 'Seahorse', 'Squid', 'Clownfish', 'Sea Turtle|turtle', 'Stingray|ray', 'Seal', 'Sea Lion', 'Eel', 'Tuna', 'Salmon', 'Clam', 'Oyster', 'Orca|killer whale', 'Swordfish', 'Manta Ray', 'Sea Urchin', 'Coral', 'Barracuda', 'Pufferfish|blowfish', 'Walrus', 'Narwhal', 'Anglerfish', 'Mussel', 'Scallop', 'Sardine', 'Cod', 'Marlin', 'Manatee', 'Sea Cucumber', 'Hammerhead Shark|hammerhead', 'Great White Shark|great white', 'Blue Whale', 'Beluga', 'Krill', 'Sea Anemone|anemone', 'Lionfish', 'Mackerel', 'Halibut', 'Plankton', 'Barnacle', 'Moray Eel|moray', 'Sea Otter', 'Humpback Whale|humpback', 'Cuttlefish', 'Nautilus', 'Ocean Sunfish|mola', 'Flounder', 'Grouper', 'Nudibranch|sea slug', 'Dugong', 'Coelacanth', 'Blobfish', 'Hagfish', 'Oarfish', 'Leafy Sea Dragon|sea dragon'] },
+  { id: 'reptiles', category: 'ANIMALS', prompt: 'Name a reptile or amphibian', rankedBy: 'pet-store and zoo popularity', ranked: ['Snake', 'Lizard', 'Turtle', 'Frog', 'Crocodile', 'Alligator', 'Iguana', 'Chameleon', 'Gecko', 'Tortoise', 'Toad', 'Komodo Dragon', 'Salamander', 'Python', 'Cobra', 'Rattlesnake', 'Newt', 'Anaconda', 'Boa Constrictor|boa', 'Gila Monster', 'Bearded Dragon', 'Axolotl', 'Monitor Lizard', 'Viper', 'Black Mamba|mamba', 'Tree Frog', 'Poison Dart Frog', 'Garter Snake', 'Skink', 'Caiman', 'Gharial', 'Basilisk', 'Horned Lizard', 'King Cobra', 'Copperhead', 'Bullfrog', 'Tuatara', 'Thorny Devil', 'Frilled Lizard', 'Caecilian', 'Mudpuppy', 'Hellbender'] },
+  { id: 'insects', category: 'ANIMALS', prompt: 'Name an insect or creepy-crawly', rankedBy: 'everyday encounter frequency and media presence', ranked: ['Ant', 'Bee', 'Butterfly', 'Spider', 'Fly', 'Mosquito', 'Ladybug|ladybird', 'Grasshopper', 'Beetle', 'Cockroach|roach', 'Dragonfly', 'Wasp', 'Moth', 'Cricket', 'Caterpillar', 'Firefly|lightning bug', 'Termite', 'Flea', 'Praying Mantis|mantis', 'Tick', 'Hornet', 'Stick Insect|walking stick', 'Centipede', 'Scorpion', 'Bumblebee', 'Gnat', 'Earwig', 'Cicada', 'Louse|lice', 'Millipede', 'Locust', 'Yellow Jacket', 'Silverfish', 'Weevil', 'Aphid', 'Stink Bug', 'Katydid', 'Horsefly', 'Dung Beetle', 'Water Strider', 'Mayfly', 'Lacewing', 'Damselfly', 'Stag Beetle', 'Bed Bug', 'Fruit Fly', 'Leafcutter Ant', 'Atlas Moth'] },
+  { id: 'cat-breeds', category: 'ANIMALS', prompt: 'Name a breed or type of cat', rankedBy: 'Cat Fanciers’ Association registration rankings', ranked: ['Siamese', 'Persian', 'Maine Coon', 'Sphynx', 'Ragdoll', 'Bengal', 'British Shorthair', 'Tabby', 'Scottish Fold', 'Calico', 'Russian Blue', 'American Shorthair', 'Abyssinian', 'Himalayan', 'Burmese', 'Birman', 'Exotic Shorthair', 'Norwegian Forest Cat', 'Siberian', 'Devon Rex', 'Cornish Rex', 'Savannah', 'Manx', 'Tonkinese', 'Oriental Shorthair', 'Turkish Angora', 'Bombay', 'Egyptian Mau', 'Ocicat', 'Chartreux', 'Balinese', 'Somali', 'Japanese Bobtail', 'LaPerm', 'Munchkin', 'Korat', 'Singapura', 'Toyger', 'Lykoi'] },
+  { id: 'dinosaurs', category: 'ANIMALS', prompt: 'Name a dinosaur or prehistoric reptile', rankedBy: 'appearances in films, toys and museum exhibits', ranked: ['Tyrannosaurus Rex|t rex|trex|tyrannosaurus', 'Triceratops', 'Velociraptor|raptor', 'Stegosaurus', 'Brachiosaurus', 'Pterodactyl|pteranodon', 'Brontosaurus', 'Spinosaurus', 'Diplodocus', 'Ankylosaurus', 'Allosaurus', 'Parasaurolophus', 'Dilophosaurus', 'Apatosaurus', 'Iguanodon', 'Pachycephalosaurus', 'Gallimimus', 'Carnotaurus', 'Compsognathus', 'Giganotosaurus', 'Argentinosaurus', 'Mosasaurus', 'Plesiosaurus', 'Archaeopteryx', 'Deinonychus', 'Utahraptor', 'Oviraptor', 'Baryonyx', 'Therizinosaurus', 'Maiasaura', 'Protoceratops', 'Styracosaurus', 'Edmontosaurus', 'Megalosaurus', 'Troodon', 'Microraptor', 'Coelophysis', 'Herrerasaurus', 'Albertosaurus', 'Suchomimus', 'Kentrosaurus', 'Amargasaurus', 'Quetzalcoatlus', 'Dreadnoughtus', 'Nodosaurus', 'Sinosauropteryx', 'Ceratosaurus', 'Corythosaurus'] },
+
+  // ------------------------------------------------------------------ SCIENCE
+  { id: 'elements', category: 'SCIENCE', prompt: 'Name a chemical element', rankedBy: 'everyday familiarity, then school-curriculum frequency', ranked: ['Oxygen', 'Hydrogen', 'Carbon', 'Gold', 'Iron', 'Helium', 'Nitrogen', 'Silver', 'Copper', 'Sodium', 'Calcium', 'Aluminum|aluminium', 'Lead', 'Chlorine', 'Uranium', 'Neon', 'Zinc', 'Mercury', 'Potassium', 'Magnesium', 'Platinum', 'Silicon', 'Sulfur|sulphur', 'Titanium', 'Tin', 'Lithium', 'Plutonium', 'Nickel', 'Iodine', 'Phosphorus', 'Fluorine', 'Cobalt', 'Argon', 'Radon', 'Chromium', 'Tungsten', 'Radium', 'Krypton', 'Xenon', 'Boron', 'Arsenic', 'Manganese', 'Beryllium', 'Cesium|caesium', 'Bromine', 'Barium', 'Bismuth', 'Cadmium', 'Strontium', 'Palladium', 'Polonium', 'Thorium', 'Gallium', 'Germanium', 'Selenium', 'Antimony', 'Vanadium', 'Molybdenum', 'Osmium', 'Iridium', 'Rubidium', 'Francium', 'Americium', 'Einsteinium', 'Rhodium', 'Zirconium', 'Tellurium', 'Indium', 'Tantalum', 'Scandium', 'Yttrium', 'Lanthanum', 'Cerium', 'Neodymium', 'Europium', 'Gadolinium', 'Curium', 'Nobelium', 'Californium', 'Fermium', 'Mendelevium', 'Lawrencium', 'Niobium', 'Ruthenium', 'Technetium', 'Hafnium', 'Rhenium', 'Thallium', 'Astatine', 'Actinium', 'Protactinium', 'Neptunium', 'Berkelium', 'Promethium', 'Samarium', 'Terbium', 'Dysprosium', 'Holmium', 'Erbium', 'Thulium', 'Ytterbium', 'Lutetium', 'Praseodymium', 'Rutherfordium', 'Dubnium', 'Seaborgium', 'Bohrium', 'Hassium', 'Meitnerium', 'Darmstadtium', 'Roentgenium', 'Copernicium', 'Nihonium', 'Flerovium', 'Moscovium', 'Livermorium', 'Tennessine', 'Oganesson'] },
+  { id: 'moons', category: 'SCIENCE', prompt: 'Name a moon in our solar system', rankedBy: 'size, NASA mission coverage and textbook mentions', ranked: ['The Moon|moon|luna', 'Titan', 'Europa', 'Io', 'Ganymede', 'Callisto', 'Phobos', 'Deimos', 'Triton', 'Enceladus', 'Charon', 'Mimas', 'Titania', 'Oberon', 'Miranda', 'Rhea', 'Iapetus', 'Dione', 'Tethys', 'Ariel', 'Umbriel', 'Hyperion', 'Phoebe', 'Nereid', 'Proteus', 'Amalthea', 'Himalia', 'Puck', 'Pandora', 'Janus', 'Epimetheus', 'Prometheus', 'Larissa', 'Nix', 'Hydra', 'Dysnomia'] },
+  { id: 'constellations', category: 'SCIENCE', prompt: 'Name a constellation', rankedBy: 'visibility, zodiac status and astronomy-book mentions', ranked: ['Orion', 'Big Dipper|ursa major', 'Little Dipper|ursa minor', 'Cassiopeia', 'Scorpius|scorpio', 'Leo', 'Taurus', 'Gemini', 'Aries', 'Sagittarius', 'Pisces', 'Virgo', 'Cancer', 'Libra', 'Capricornus|capricorn', 'Aquarius', 'Andromeda', 'Pegasus', 'Draco', 'Cygnus', 'Perseus', 'Lyra', 'Hercules', 'Southern Cross|crux', 'Centaurus', 'Canis Major', 'Aquila', 'Bootes', 'Cepheus', 'Auriga', 'Canis Minor', 'Corona Borealis', 'Ophiuchus', 'Hydra', 'Phoenix', 'Carina', 'Monoceros', 'Eridanus', 'Lepus', 'Delphinus', 'Columba', 'Vela', 'Sculptor', 'Fornax', 'Pavo', 'Tucana', 'Lupus', 'Camelopardalis', 'Microscopium', 'Mensa'] },
+  { id: 'body-parts', category: 'SCIENCE', prompt: 'Name a part of the human body', rankedBy: 'everyday-vocabulary frequency', ranked: ['Head', 'Hand', 'Arm', 'Leg', 'Foot|feet', 'Eye', 'Nose', 'Mouth', 'Ear', 'Finger', 'Heart', 'Brain', 'Hair', 'Knee', 'Elbow', 'Toe', 'Shoulder', 'Neck', 'Stomach', 'Back', 'Chest', 'Lips', 'Teeth|tooth', 'Tongue', 'Face', 'Skin', 'Lungs', 'Liver', 'Kidney', 'Thumb', 'Ankle', 'Wrist', 'Hip', 'Chin', 'Cheek', 'Forehead', 'Eyebrow', 'Eyelash', 'Belly Button|navel', 'Heel', 'Fingernail|nail', 'Throat', 'Spine', 'Rib', 'Skull', 'Waist', 'Thigh', 'Calf', 'Palm', 'Knuckle', 'Jaw', 'Bladder', 'Intestines|gut', 'Pancreas', 'Appendix', 'Spleen', 'Gallbladder', 'Esophagus', 'Tonsils', 'Earlobe', 'Armpit', 'Shin', 'Nostril', 'Eyelid', 'Temple', 'Uvula', 'Diaphragm', 'Trachea|windpipe', 'Larynx|voice box', 'Cornea', 'Retina', 'Cochlea', 'Thyroid', 'Pituitary Gland|pituitary', 'Hypothalamus', 'Philtrum', 'Septum', 'Cuticle'] },
+  { id: 'bones', category: 'SCIENCE', prompt: 'Name a bone in the human body', rankedBy: 'everyday familiarity, then anatomy-class frequency', ranked: ['Femur', 'Skull|cranium', 'Rib', 'Spine|vertebrae|backbone', 'Tibia', 'Humerus', 'Pelvis|hip bone', 'Fibula', 'Radius', 'Ulna', 'Clavicle|collarbone', 'Jawbone|mandible', 'Sternum|breastbone', 'Scapula|shoulder blade', 'Patella|kneecap', 'Coccyx|tailbone', 'Phalanges|finger bone', 'Sacrum', 'Metacarpals', 'Carpals', 'Tarsals', 'Metatarsals', 'Hyoid', 'Stapes|stirrup', 'Incus|anvil', 'Malleus|hammer', 'Maxilla', 'Calcaneus|heel bone', 'Talus', 'Atlas', 'Axis', 'Ilium', 'Ischium', 'Pubis', 'Zygomatic|cheekbone', 'Nasal Bone', 'Frontal Bone', 'Occipital', 'Parietal', 'Temporal Bone', 'Sphenoid', 'Ethmoid', 'Vomer', 'Lacrimal', 'Scaphoid', 'Lunate', 'Hamate', 'Navicular', 'Cuboid'] },
+  { id: 'scientists', category: 'SCIENCE', prompt: 'Name a famous scientist or inventor', rankedBy: 'how often the name appears in schoolbooks and pop culture', ranked: ['Albert Einstein|einstein', 'Isaac Newton|newton', 'Charles Darwin|darwin', 'Marie Curie|curie', 'Nikola Tesla|tesla', 'Galileo Galilei|galileo', 'Stephen Hawking|hawking', 'Thomas Edison|edison', 'Aristotle', 'Leonardo da Vinci|da vinci', 'Nicolaus Copernicus|copernicus', 'Louis Pasteur|pasteur', 'Alexander Fleming|fleming', 'Gregor Mendel|mendel', 'Neil deGrasse Tyson|neil degrasse tyson', 'Carl Sagan|sagan', 'Ada Lovelace|lovelace', 'Alan Turing|turing', 'Benjamin Franklin|franklin', 'Archimedes', 'Pythagoras', 'Michael Faraday|faraday', 'Johannes Kepler|kepler', 'Niels Bohr|bohr', 'Max Planck|planck', 'Rosalind Franklin', 'Richard Feynman|feynman', 'Robert Oppenheimer|oppenheimer', 'Dmitri Mendeleev|mendeleev', 'Edwin Hubble|hubble', 'James Watson', 'Francis Crick|crick', 'Jane Goodall|goodall', 'Alexander Graham Bell|graham bell', 'Euclid', 'Werner Heisenberg|heisenberg', 'Erwin Schrodinger|schrodinger', 'James Clerk Maxwell|maxwell', 'Antoine Lavoisier|lavoisier', 'Rachel Carson', 'Enrico Fermi|fermi', 'Ernest Rutherford|rutherford', 'Tim Berners-Lee|berners lee', 'Katherine Johnson', 'George Washington Carver|carver', 'Carl Linnaeus|linnaeus', 'Robert Hooke|hooke', 'Paul Dirac|dirac', 'Hypatia', 'Lise Meitner|meitner', 'Barbara McClintock|mcclintock', 'Srinivasa Ramanujan|ramanujan', 'Emmy Noether|noether', 'Alfred Wegener|wegener', 'Tycho Brahe|brahe', 'Chien-Shiung Wu'] },
+  { id: 'car-brands', category: 'SCIENCE', prompt: 'Name a car brand', rankedBy: 'US/European sales plus brand-awareness surveys', ranked: ['Toyota', 'Ford', 'Honda', 'Chevrolet|chevy', 'BMW', 'Mercedes-Benz|mercedes', 'Tesla', 'Ferrari', 'Audi', 'Nissan', 'Lamborghini', 'Porsche', 'Volkswagen|vw', 'Jeep', 'Hyundai', 'Dodge', 'Kia', 'Subaru', 'Mazda', 'Lexus', 'Cadillac', 'Jaguar', 'Land Rover|range rover', 'Volvo', 'Rolls-Royce', 'Bentley', 'Buick', 'GMC', 'Chrysler', 'Mitsubishi', 'Bugatti', 'Maserati', 'Aston Martin', 'Lincoln', 'Fiat', 'Mini', 'Acura', 'Infiniti', 'Ram', 'Alfa Romeo', 'McLaren', 'Peugeot', 'Renault', 'Genesis', 'Suzuki', 'Pontiac', 'Citroen', 'Hummer', 'Rivian', 'Polestar', 'Lotus', 'Skoda', 'Saturn', 'Koenigsegg', 'Pagani', 'Lucid', 'Saab', 'Oldsmobile', 'Plymouth', 'DeLorean', 'Opel', 'Vauxhall', 'Lada', 'BYD', 'Datsun', 'Tata', 'Dacia', 'Seat'] },
+  { id: 'programming-languages', category: 'SCIENCE', prompt: 'Name a programming language', rankedBy: 'developer-survey usage and job-posting volume', ranked: ['Python', 'JavaScript|js', 'Java', 'C++|c plus plus|cpp', 'HTML', 'C', 'C#|c sharp|csharp', 'SQL', 'PHP', 'Ruby', 'Swift', 'TypeScript', 'Go|golang', 'Rust', 'Kotlin', 'CSS', 'R', 'Scratch', 'Assembly', 'MATLAB', 'Perl', 'Visual Basic|vb', 'Scala', 'Dart', 'Lua', 'Haskell', 'Objective-C', 'Bash|shell', 'Fortran', 'COBOL', 'Lisp', 'Julia', 'Pascal', 'Elixir', 'Clojure', 'Erlang', 'Groovy', 'F#|f sharp', 'Prolog', 'OCaml', 'Zig', 'Ada', 'Smalltalk', 'Solidity', 'Elm', 'Racket', 'Nim', 'Crystal', 'BASIC'] },
+
+  // ------------------------------------------------------- MOVIES / TV / GAMES
+  { id: 'pixar-movies', category: 'MOVIES', prompt: 'Name a Pixar movie', rankedBy: 'box office plus cultural staying power', ranked: ['Toy Story', 'Finding Nemo', 'Cars', 'Up', 'Monsters, Inc.|monsters inc', 'The Incredibles', 'Inside Out', 'Coco', 'Ratatouille', 'WALL-E|walle', 'Toy Story 2', 'Toy Story 3', 'Finding Dory', 'Brave', "A Bug's Life|bugs life", 'Monsters University', 'Inside Out 2', 'Incredibles 2', 'Toy Story 4', 'Soul', 'Cars 2', 'Cars 3', 'Luca', 'Turning Red', 'Onward', 'Lightyear', 'The Good Dinosaur', 'Elemental', 'Elio'] },
+  { id: 'disney-animated', category: 'MOVIES', prompt: 'Name a Disney animated movie (not Pixar)', rankedBy: 'box office plus cultural staying power', ranked: ['The Lion King', 'Frozen', 'Aladdin', 'Beauty and the Beast', 'The Little Mermaid', 'Snow White|snow white and the seven dwarfs', 'Cinderella', 'Moana', 'Tangled', 'Mulan', 'Sleeping Beauty', 'Pinocchio', 'Bambi', 'Dumbo', 'The Jungle Book', 'Peter Pan', 'Lady and the Tramp', '101 Dalmatians|one hundred and one dalmatians', 'Pocahontas', 'Hercules', 'Tarzan', 'Lilo & Stitch|lilo and stitch', 'Zootopia', 'Encanto', 'Big Hero 6', 'Wreck-It Ralph', 'Frozen II|frozen 2', 'Alice in Wonderland', 'The Princess and the Frog', 'Fantasia', 'The Hunchback of Notre Dame|hunchback', 'Bolt', 'Robin Hood', 'The Aristocats', "The Emperor's New Groove|emperors new groove", 'Raya and the Last Dragon|raya', 'Treasure Planet', 'Atlantis: The Lost Empire|atlantis', 'The Fox and the Hound', 'Chicken Little', 'Meet the Robinsons', 'Brother Bear', 'Wish', 'Oliver & Company|oliver and company', 'The Rescuers', 'The Sword in the Stone', 'Strange World', 'Home on the Range', 'Dinosaur', 'The Great Mouse Detective', 'The Black Cauldron', 'The Many Adventures of Winnie the Pooh|winnie the pooh', 'Fantasia 2000', 'Moana 2', 'Ralph Breaks the Internet', 'Saludos Amigos', 'The Three Caballeros', 'Melody Time', 'Make Mine Music', 'Fun and Fancy Free'] },
+  { id: 'marvel-characters', category: 'MOVIES', prompt: 'Name a Marvel hero or villain', rankedBy: 'MCU screen time, box office and comic sales', ranked: ['Spider-Man|peter parker', 'Iron Man|tony stark', 'Captain America|steve rogers', 'Thor', 'Hulk|bruce banner', 'Black Widow|natasha romanoff', 'Wolverine|logan', 'Black Panther|tchalla', 'Deadpool', 'Thanos', 'Doctor Strange|dr strange', 'Loki', 'Captain Marvel|carol danvers', 'Hawkeye', 'Groot', 'Ant-Man', 'Star-Lord|peter quill', 'Scarlet Witch|wanda', 'Vision', 'Rocket|rocket raccoon', 'Gamora', 'Venom', 'Magneto', 'Storm', 'Professor X|charles xavier', 'Falcon', 'Winter Soldier|bucky', 'Daredevil', 'Nick Fury', 'Wasp', 'Drax', 'Silver Surfer', 'Cyclops', 'Jean Grey', 'Rogue', 'Ghost Rider', 'Mystique', 'Green Goblin', 'Doctor Doom|dr doom', 'Punisher', 'Gambit', 'Nebula', 'Mantis', 'Ultron', 'Shang-Chi', 'Ms. Marvel|kamala khan', 'Moon Knight', 'She-Hulk', 'Mister Fantastic|mr fantastic|reed richards', 'Human Torch', 'Invisible Woman', 'The Thing', 'Galactus', 'Beast', 'Nightcrawler', 'Iceman', 'Colossus', 'Juggernaut', 'Kang', 'Red Skull', 'Kingpin', 'Carnage', 'Okoye', 'Wong', 'Blade', 'Luke Cage', 'Jessica Jones', 'Iron Fist', 'Elektra', 'Quicksilver', 'Squirrel Girl', 'Howard the Duck', 'Adam Warlock', 'Namor', 'Black Bolt', 'Sentry', 'Cable', 'Bishop', 'Dazzler', 'Morbius', 'Mephisto'] },
+  { id: 'harry-potter', category: 'MOVIES', prompt: 'Name a Harry Potter character', rankedBy: 'screen time and page mentions across the series', ranked: ['Harry Potter|harry', 'Hermione Granger|hermione', 'Ron Weasley|ron', 'Albus Dumbledore|dumbledore', 'Lord Voldemort|voldemort|tom riddle', 'Severus Snape|snape', 'Rubeus Hagrid|hagrid', 'Draco Malfoy|draco|malfoy', 'Sirius Black|sirius', 'Dobby', 'Neville Longbottom|neville', 'Ginny Weasley|ginny', 'Luna Lovegood|luna', 'Fred Weasley|fred', 'George Weasley|george', 'Minerva McGonagall|mcgonagall', 'Bellatrix Lestrange|bellatrix', 'Dolores Umbridge|umbridge', 'Remus Lupin|lupin', 'Hedwig', 'Cedric Diggory|cedric', 'Lucius Malfoy|lucius', 'Gilderoy Lockhart|lockhart', 'Peter Pettigrew|wormtail', 'Mad-Eye Moody|moody', 'Cho Chang', 'Arthur Weasley', 'Molly Weasley', 'Percy Weasley|percy', 'Nearly Headless Nick', 'Dudley Dursley|dudley', 'Vernon Dursley', 'Petunia Dursley', 'Argus Filch|filch', 'Kreacher', 'Fawkes', 'Crookshanks', 'Lily Potter', 'James Potter', 'Nagini', 'Buckbeak', 'Fleur Delacour|fleur', 'Viktor Krum|krum', 'Bill Weasley', 'Charlie Weasley', 'Nymphadora Tonks|tonks', 'Horace Slughorn|slughorn', 'Quirinus Quirrell|quirrell', 'Gellert Grindelwald|grindelwald', 'Aragog', 'Fluffy', 'Moaning Myrtle|myrtle', 'Seamus Finnigan|seamus', 'Dean Thomas', 'Oliver Wood', 'Madam Pomfrey|pomfrey', 'Sybill Trelawney|trelawney', 'Filius Flitwick|flitwick', 'Pomona Sprout|sprout', 'Ollivander', 'Kingsley Shacklebolt|kingsley', 'Lavender Brown', 'Scabbers', 'Peeves', 'Hannah Abbott', 'Parvati Patil', 'Padma Patil', 'Griphook', 'Winky', 'Fenrir Greyback', 'Aberforth Dumbledore|aberforth', 'Rita Skeeter', 'Cornelius Fudge|fudge', 'Barty Crouch', 'Vincent Crabbe|crabbe', 'Gregory Goyle|goyle', 'Pansy Parkinson', 'Xenophilius Lovegood', 'Mundungus Fletcher'] },
+  { id: 'star-wars', category: 'MOVIES', prompt: 'Name a Star Wars character', rankedBy: 'screen time across films and series plus merch sales', ranked: ['Luke Skywalker|luke', 'Darth Vader|vader|anakin skywalker|anakin', 'Han Solo|han', 'Princess Leia|leia', 'Yoda', 'Chewbacca|chewie', 'R2-D2|r2d2', 'C-3PO|c3po', 'Obi-Wan Kenobi|obi wan|kenobi', 'Darth Maul|maul', 'Emperor Palpatine|palpatine|darth sidious', 'Boba Fett', 'Kylo Ren|ben solo', 'Rey', 'BB-8', 'Jabba the Hutt|jabba', 'Grogu|baby yoda', 'The Mandalorian|mandalorian|din djarin|mando', 'Padme Amidala|padme', 'Lando Calrissian|lando', 'Jar Jar Binks|jar jar', 'Finn', 'Poe Dameron|poe', 'Count Dooku|dooku', 'Mace Windu|windu', 'Qui-Gon Jinn|qui gon', 'Stormtrooper', 'Ahsoka Tano|ahsoka', 'General Grievous|grievous', 'Jyn Erso', 'Wicket|ewok', 'Admiral Ackbar|ackbar', 'Grand Moff Tarkin|tarkin', 'Jango Fett', 'Cassian Andor|andor', 'K-2SO', 'Captain Phasma|phasma', 'Supreme Leader Snoke|snoke', 'Rose Tico', 'Greedo', 'Watto', 'Bossk', 'IG-88', 'Wedge Antilles|wedge', 'Nien Nunb', 'Darth Plagueis', 'Sabine Wren', 'Ezra Bridger', 'Kanan Jarrus', 'Hera Syndulla', 'Grand Admiral Thrawn|thrawn', 'Moff Gideon', 'Cad Bane', 'Asajj Ventress|ventress', 'Bo-Katan', 'Fennec Shand', 'Bib Fortuna', 'Max Rebo', 'Salacious Crumb'] },
+  { id: 'pokemon', category: 'GAMES', prompt: 'Name a Pokémon', rankedBy: 'popularity polls, anime screen time and merch sales', ranked: ['Pikachu', 'Charizard', 'Bulbasaur', 'Squirtle', 'Charmander', 'Mewtwo', 'Eevee', 'Jigglypuff', 'Snorlax', 'Mew', 'Psyduck', 'Meowth', 'Gengar', 'Lucario', 'Gyarados', 'Magikarp', 'Blastoise', 'Venusaur', 'Dragonite', 'Onix', 'Togepi', 'Machamp', 'Greninja', 'Lapras', 'Vaporeon', 'Jolteon', 'Flareon', 'Umbreon', 'Espeon', 'Sylveon', 'Arcanine', 'Growlithe', 'Pichu', 'Raichu', 'Ditto', 'Rayquaza', 'Lugia', 'Ho-Oh', 'Butterfree', 'Caterpie', 'Pidgey', 'Rattata', 'Zubat', 'Geodude', 'Slowpoke', 'Cubone', 'Abra', 'Alakazam', 'Haunter', 'Gastly', 'Vulpix', 'Ninetales', 'Clefairy', 'Chikorita', 'Cyndaquil', 'Totodile', 'Treecko', 'Torchic', 'Mudkip', 'Piplup', 'Chimchar', 'Turtwig', 'Garchomp', 'Gardevoir', 'Blaziken', 'Metagross', 'Tyranitar', 'Scizor', 'Scyther', 'Marowak', 'Wobbuffet', 'Mimikyu', 'Rowlet', 'Litten', 'Popplio', 'Sprigatito', 'Fuecoco', 'Quaxly', 'Wooper', 'Bidoof', 'Hoothoot', 'Shuckle', 'Spheal', 'Klefki', 'Dedenne', 'Stunfisk', 'Luvdisc', 'Bronzong', 'Sudowoodo', 'Kecleon', 'Furret'] },
+  { id: 'nintendo-characters', category: 'GAMES', prompt: 'Name a Nintendo video game character', rankedBy: 'franchise sales and Smash Bros popularity polls', ranked: ['Mario', 'Luigi', 'Princess Peach|peach', 'Bowser', 'Link', 'Princess Zelda|zelda', 'Donkey Kong', 'Yoshi', 'Pikachu', 'Kirby', 'Samus Aran|samus', 'Wario', 'Toad', 'Fox McCloud|fox', 'Ganondorf|ganon', 'Diddy Kong', 'Captain Falcon', 'Ness', 'Waluigi', 'Princess Daisy|daisy', 'Rosalina', 'Isabelle', 'Tom Nook', 'Villager', 'Bowser Jr.', 'Boo', 'Goomba', 'Koopa Troopa', 'Shy Guy', 'King K. Rool', 'Meta Knight', 'King Dedede', 'Marth', 'Falco', 'Inkling', 'Olimar', 'Pit', 'Ridley', 'Lakitu', 'Chain Chomp', 'Toadette', 'Birdo', 'Pauline', 'Captain Toad', 'Dry Bones', 'Shulk', 'Ike', 'Lucina', 'Wolf O’Donnell|wolf', 'Lucas', 'Palutena', 'Dark Pit', 'Little Mac', 'Duck Hunt Dog'] },
+  { id: 'sitcoms', category: 'TV', prompt: 'Name a TV sitcom', rankedBy: 'ratings, streaming hours and syndication reach', ranked: ['Friends', 'The Office', 'Seinfeld', 'The Big Bang Theory', 'How I Met Your Mother|himym', 'Parks and Recreation|parks and rec', 'Modern Family', 'Brooklyn Nine-Nine|brooklyn 99', 'The Simpsons', 'Cheers', 'Frasier', 'Two and a Half Men', 'Family Guy', 'The Fresh Prince of Bel-Air|fresh prince', 'Full House', 'Arrested Development', 'Curb Your Enthusiasm|curb', "It's Always Sunny in Philadelphia|always sunny", 'Everybody Loves Raymond', 'I Love Lucy', "That '70s Show|that 70s show", "Schitt's Creek", 'Scrubs', 'New Girl', 'Community', '30 Rock', 'Abbott Elementary', 'Ted Lasso', 'Married... with Children', 'Happy Days', 'The Golden Girls', 'Malcolm in the Middle', 'Home Improvement', 'Family Matters', 'Saved by the Bell', 'Boy Meets World', 'Will & Grace|will and grace', 'M*A*S*H|mash', 'The Good Place', 'Veep', 'Silicon Valley', 'What We Do in the Shadows', 'Superstore', 'Black-ish', 'The King of Queens', 'Taxi', 'Roseanne', 'The Jeffersons', 'Night Court', 'Fawlty Towers', 'The IT Crowd', 'Peep Show', 'Blackadder', 'Mork & Mindy', "Gilligan's Island", 'The Brady Bunch', 'Bewitched', 'Leave It to Beaver', 'The Honeymooners', 'Get Smart', 'Spaced'] },
+  { id: 'board-games', category: 'GAMES', prompt: 'Name a board game', rankedBy: 'all-time sales and household ownership surveys', ranked: ['Monopoly', 'Chess', 'Scrabble', 'Clue|cluedo', 'Checkers|draughts', 'Candy Land', 'Risk', 'Sorry!', 'The Game of Life|game of life', 'Battleship', 'Trivial Pursuit', 'Connect Four|connect 4', 'Operation', 'Guess Who?', 'Chutes and Ladders|snakes and ladders', 'Catan|settlers of catan', 'Jenga', 'Pictionary', 'Mouse Trap', 'Yahtzee', 'Backgammon', 'Stratego', 'Ticket to Ride', 'Mancala', 'Trouble', 'Othello|reversi', 'Go', 'Pandemic', 'Hungry Hungry Hippos', 'Boggle', 'Cranium', 'Taboo', 'Apples to Apples', 'Mastermind', 'Carcassonne', 'Codenames', 'Parcheesi|ludo', 'Twister', 'Axis & Allies', 'Dungeons & Dragons|dungeons and dragons|dnd', 'Azul', 'Splendor', 'Dixit', 'Wingspan', 'Terraforming Mars', '7 Wonders|seven wonders', 'Blokus', 'Qwirkle', 'Sequence', 'Rummikub', 'Chinese Checkers', 'Gloomhaven', 'Agricola', 'Puerto Rico', 'Power Grid', 'Diplomacy', 'Twilight Imperium'] },
+
+  // ------------------------------------------------------------ MUSIC & ARTS
+  { id: 'beatles-songs', category: 'MUSIC', prompt: 'Name a Beatles song', rankedBy: 'streaming counts and chart performance', ranked: ['Hey Jude', 'Let It Be', 'Yesterday', 'Here Comes the Sun', 'Yellow Submarine', 'Come Together', 'Twist and Shout', 'All You Need Is Love', 'Help!', 'I Want to Hold Your Hand', "A Hard Day's Night", 'Eleanor Rigby', 'Penny Lane', 'Strawberry Fields Forever|strawberry fields', 'Blackbird', 'Something', 'Love Me Do', "Can't Buy Me Love", 'Lucy in the Sky with Diamonds|lucy in the sky', 'Ob-La-Di, Ob-La-Da|obladi oblada', 'Revolution', 'Get Back', 'In My Life', 'She Loves You', "Octopus's Garden|octopus garden", 'Ticket to Ride', 'With a Little Help from My Friends', "Sgt. Pepper's Lonely Hearts Club Band|sgt peppers|sergeant pepper", 'While My Guitar Gently Weeps', 'Norwegian Wood', 'Paperback Writer', 'Day Tripper', 'Drive My Car', 'Michelle', 'Eight Days a Week', 'Nowhere Man', 'The Long and Winding Road', 'Back in the U.S.S.R.|back in the ussr', 'A Day in the Life', 'I Saw Her Standing There', 'Across the Universe', 'Here, There and Everywhere', 'Helter Skelter', 'Hello, Goodbye', 'Taxman', 'Got to Get You into My Life', 'Dear Prudence', 'I Am the Walrus', 'Rain', 'Please Please Me', 'From Me to You', 'And I Love Her', 'Girl', 'Julia', 'Golden Slumbers', "Don't Let Me Down", 'Two of Us', 'Tomorrow Never Knows', 'Rocky Raccoon', "Mother Nature's Son", "I've Just Seen a Face", 'For No One', 'Martha My Dear', 'Savoy Truffle'] },
+  { id: 'instruments', category: 'MUSIC', prompt: 'Name a musical instrument', rankedBy: 'how many people play or recognize it (school programs, sales)', ranked: ['Guitar', 'Piano', 'Drums', 'Violin', 'Flute', 'Trumpet', 'Saxophone|sax', 'Bass Guitar|bass', 'Cello', 'Clarinet', 'Harp', 'Ukulele', 'Trombone', 'Keyboard', 'Harmonica', 'Tuba', 'Banjo', 'Xylophone', 'Accordion', 'Tambourine', 'Viola', 'French Horn|horn', 'Oboe', 'Recorder', 'Bagpipes', 'Organ', 'Triangle', 'Cymbals', 'Double Bass|upright bass|contrabass', 'Mandolin', 'Bongos', 'Synthesizer|synth', 'Bassoon', 'Maracas', 'Glockenspiel', 'Sitar', 'Harpsichord', 'Piccolo', 'Kazoo', 'Steel Drum|steel pan', 'Timpani', 'Cowbell', 'Castanets', 'Didgeridoo', 'Marimba', 'Lute', 'Djembe', 'Theremin', 'Bugle', 'Cornet', 'Euphonium', 'Sousaphone', 'Lyre', 'Zither', 'Dulcimer', 'Ocarina', 'Shamisen', 'Erhu', 'Koto', 'Tabla', 'Bouzouki', 'Balalaika', 'Kalimba|mbira', 'Hurdy-Gurdy', 'Oud', 'Pan Flute|panpipes', 'Cajon', 'Vibraphone', 'Celesta', 'Melodica'] },
+  { id: 'painters', category: 'ARTS', prompt: 'Name a famous painter or visual artist', rankedBy: 'museum attendance, auction records and textbook mentions', ranked: ['Leonardo da Vinci|da vinci|leonardo', 'Vincent van Gogh|van gogh', 'Pablo Picasso|picasso', 'Michelangelo', 'Claude Monet|monet', 'Salvador Dali|dali', 'Andy Warhol|warhol', 'Rembrandt', 'Frida Kahlo|frida|kahlo', 'Bob Ross', "Georgia O'Keeffe|okeeffe", 'Raphael', 'Jackson Pollock|pollock', 'Edvard Munch|munch', 'Henri Matisse|matisse', 'Johannes Vermeer|vermeer', 'Pierre-Auguste Renoir|renoir', 'Edgar Degas|degas', 'Paul Cezanne|cezanne', 'Gustav Klimt|klimt', 'Norman Rockwell|rockwell', 'Banksy', 'Jean-Michel Basquiat|basquiat', 'Roy Lichtenstein|lichtenstein', 'Keith Haring|haring', 'Wassily Kandinsky|kandinsky', 'Rene Magritte|magritte', 'Paul Gauguin|gauguin', 'Edward Hopper|hopper', 'Caravaggio', 'Sandro Botticelli|botticelli', 'Francisco Goya|goya', 'Mark Rothko|rothko', 'Diego Rivera|rivera', 'Edouard Manet|manet', 'Titian', 'El Greco', 'Hieronymus Bosch|bosch', 'Jan van Eyck|van eyck', 'J.M.W. Turner|turner', 'John Constable|constable', 'Piet Mondrian|mondrian', 'Joan Miro|miro', 'Marc Chagall|chagall', 'Georges Seurat|seurat', 'Henri de Toulouse-Lautrec|toulouse lautrec', 'Yayoi Kusama|kusama', 'Katsushika Hokusai|hokusai', 'Artemisia Gentileschi|gentileschi', 'Pieter Bruegel|bruegel', 'Albrecht Durer|durer', 'Egon Schiele|schiele', 'Amedeo Modigliani|modigliani', 'Camille Pissarro|pissarro', 'Mary Cassatt|cassatt', 'Grant Wood', 'James McNeill Whistler|whistler', 'Winslow Homer', 'David Hockney|hockney', 'Lucian Freud'] },
+  { id: 'shakespeare', category: 'ARTS', prompt: 'Name a Shakespeare play', rankedBy: 'performance frequency and school-curriculum use', ranked: ['Romeo and Juliet', 'Hamlet', 'Macbeth', "A Midsummer Night's Dream|midsummer nights dream", 'Othello', 'King Lear', 'Julius Caesar', 'The Tempest', 'Much Ado About Nothing', 'Twelfth Night', 'The Merchant of Venice', 'The Taming of the Shrew', 'As You Like It', 'Antony and Cleopatra', 'Richard III|richard the third|richard 3', 'Henry V|henry the fifth|henry 5', 'The Comedy of Errors', "The Winter's Tale", 'Measure for Measure', "All's Well That Ends Well", 'Coriolanus', 'Titus Andronicus', 'The Merry Wives of Windsor', 'Richard II|richard 2', 'Henry IV, Part 1|henry iv|henry 4', 'Henry VIII|henry 8', "Love's Labour's Lost", 'The Two Gentlemen of Verona', 'Troilus and Cressida', 'Cymbeline', 'Pericles', 'Timon of Athens', 'King John', 'Henry VI, Part 1|henry vi|henry 6', 'Henry IV, Part 2', 'Henry VI, Part 2', 'Henry VI, Part 3', 'The Two Noble Kinsmen'] },
+  { id: 'greek-gods', category: 'ARTS', prompt: 'Name a god, goddess or titan from Greek mythology', rankedBy: 'appearances in films, books and school myth units', ranked: ['Zeus', 'Poseidon', 'Hades', 'Athena', 'Apollo', 'Aphrodite', 'Ares', 'Hermes', 'Hera', 'Artemis', 'Dionysus', 'Hephaestus', 'Demeter', 'Persephone', 'Kronos|cronus', 'Eros', 'Nike', 'Gaia', 'Hestia', 'Pan', 'Nemesis', 'Hecate', 'Atlas', 'Prometheus', 'Helios', 'Selene', 'Eos', 'Uranus', 'Rhea', 'Hypnos', 'Thanatos', 'Morpheus', 'Iris', 'Hebe', 'Tyche', 'Asclepius', 'Nyx', 'Chaos', 'Oceanus', 'Hyperion', 'Themis', 'Mnemosyne', 'Triton', 'Aeolus', 'Boreas', 'Erebus', 'Tartarus', 'Eris', 'Phobos', 'Deimos', 'Harmonia', 'Metis'] },
+
+  // ------------------------------------------------------- WORLD & EVERYDAY
+  { id: 'us-presidents', category: 'HISTORY', prompt: 'Name a US president', rankedBy: 'historian rankings blended with modern name recognition', ranked: ['George Washington|washington', 'Abraham Lincoln|lincoln|abe lincoln', 'Barack Obama|obama', 'Donald Trump|trump', 'Joe Biden|biden', 'John F. Kennedy|jfk|kennedy', 'Thomas Jefferson|jefferson', 'Franklin D. Roosevelt|fdr|franklin roosevelt', 'Theodore Roosevelt|teddy roosevelt', 'Ronald Reagan|reagan', 'Bill Clinton|clinton', 'George W. Bush|bush|dubya', 'George H. W. Bush|bush senior', 'Richard Nixon|nixon', 'Jimmy Carter|carter', 'Dwight D. Eisenhower|eisenhower|ike', 'Harry S. Truman|truman', 'John Adams', 'Andrew Jackson', 'James Madison|madison', 'Ulysses S. Grant|grant', 'Woodrow Wilson|wilson', 'James Monroe|monroe', 'Lyndon B. Johnson|lbj|lyndon johnson', 'Gerald Ford|ford', 'John Quincy Adams', 'Herbert Hoover|hoover', 'Calvin Coolidge|coolidge', 'William Howard Taft|taft', 'Andrew Johnson', 'William McKinley|mckinley', 'Grover Cleveland|cleveland', 'James K. Polk|polk', 'Warren G. Harding|harding', 'Martin Van Buren|van buren', 'William Henry Harrison', 'Benjamin Harrison', 'Zachary Taylor', 'Rutherford B. Hayes|hayes', 'James Garfield|garfield', 'Chester A. Arthur|chester arthur', 'Franklin Pierce', 'James Buchanan|buchanan', 'John Tyler|tyler', 'Millard Fillmore|fillmore'] },
+  { id: 'languages', category: 'WORLD', prompt: 'Name a language', rankedBy: 'number of speakers plus how often it is studied', ranked: ['English', 'Spanish', 'French', 'Chinese|mandarin', 'German', 'Japanese', 'Italian', 'Russian', 'Arabic', 'Portuguese', 'Hindi', 'Korean', 'Latin', 'Greek', 'Dutch', 'Swedish', 'Hebrew', 'Turkish', 'Polish', 'Cantonese', 'Vietnamese', 'Thai', 'Bengali', 'Urdu', 'Swahili', 'Tagalog|filipino', 'Irish|gaelic', 'Norwegian', 'Danish', 'Finnish', 'Persian|farsi', 'Punjabi', 'Indonesian', 'Ukrainian', 'Czech', 'Hungarian', 'Romanian', 'Welsh', 'American Sign Language|asl|sign language', 'Tamil', 'Malay', 'Telugu', 'Esperanto', 'Icelandic', 'Navajo', 'Yiddish', 'Zulu', 'Afrikaans', 'Hawaiian', 'Catalan', 'Basque', 'Serbian', 'Croatian', 'Amharic', 'Gujarati', 'Marathi', 'Quechua', 'Maori', 'Klingon', 'Mongolian', 'Somali', 'Yoruba', 'Hausa', 'Tibetan', 'Sanskrit', 'Cherokee'] },
+  { id: 'colors', category: 'WORLD', prompt: 'Name a color', rankedBy: 'frequency in everyday English', ranked: ['Red', 'Blue', 'Green', 'Yellow', 'Purple', 'Orange', 'Pink', 'Black', 'White', 'Brown', 'Gray|grey', 'Teal', 'Turquoise', 'Gold', 'Silver', 'Navy Blue|navy', 'Maroon', 'Violet', 'Indigo', 'Beige', 'Magenta', 'Cyan', 'Lavender', 'Lime', 'Tan', 'Crimson', 'Peach', 'Coral', 'Olive', 'Burgundy', 'Aqua', 'Mint', 'Salmon', 'Ivory', 'Cream', 'Khaki', 'Charcoal', 'Lilac', 'Fuchsia', 'Mustard', 'Scarlet', 'Amber', 'Bronze', 'Plum', 'Rose', 'Emerald', 'Sapphire', 'Ruby', 'Periwinkle', 'Taupe', 'Mauve', 'Chartreuse', 'Vermilion', 'Cerulean', 'Ochre', 'Sienna', 'Mahogany', 'Cobalt', 'Sepia', 'Puce', 'Celadon', 'Wisteria', 'Viridian', 'Gamboge', 'Zaffre', 'Coquelicot'] },
+  { id: 'jobs', category: 'WORLD', prompt: 'Name a job or profession', rankedBy: 'how often kids and adults name it in career surveys', ranked: ['Doctor', 'Teacher', 'Nurse', 'Lawyer', 'Firefighter', 'Police Officer|cop|policeman', 'Engineer', 'Chef|cook', 'Dentist', 'Pilot', 'Accountant', 'Farmer', 'Scientist', 'Actor|actress', 'Artist', 'Software Developer|programmer|software engineer|coder|developer', 'Plumber', 'Electrician', 'Mechanic', 'Veterinarian|vet', 'Astronaut', 'Architect', 'Musician', 'Writer|author', 'Soldier', 'Cashier', 'Waiter|waitress|server', 'Carpenter', 'Pharmacist', 'Banker', 'Surgeon', 'Judge', 'Photographer', 'Journalist|reporter', 'Mail Carrier|mailman|postman', 'Barber', 'Hairdresser|hairstylist', 'Truck Driver', 'Librarian', 'Janitor|custodian', 'Professor', 'Psychologist', 'Therapist', 'Athlete', 'Construction Worker', 'Salesperson', 'Secretary', 'Designer', 'Real Estate Agent|realtor', 'Paramedic', 'Baker', 'Butcher', 'Lifeguard', 'Flight Attendant', 'Zookeeper', 'Tailor', 'Florist', 'Translator', 'Bartender', 'Detective', 'Economist', 'Optometrist', 'Welder', 'Locksmith', 'Geologist', 'Archaeologist', 'Sommelier', 'Actuary', 'Taxidermist', 'Cartographer', 'Blacksmith', 'Cobbler', 'Glassblower', 'Chimney Sweep', 'Lighthouse Keeper', 'Farrier', 'Luthier'] },
+  { id: 'clothing-brands', category: 'WORLD', prompt: 'Name a clothing or sneaker brand', rankedBy: 'global revenue and brand-awareness rankings', ranked: ['Nike', 'Adidas', 'Gucci', "Levi's", 'Puma', 'Under Armour', 'Gap', 'Louis Vuitton', 'Zara', 'H&M|h and m', 'Ralph Lauren|polo', 'Calvin Klein', 'Tommy Hilfiger', 'Converse', 'Vans', 'Chanel', 'Prada', 'Old Navy', 'Reebok', 'The North Face|north face', 'Supreme', 'New Balance', 'Lululemon', 'Versace', 'Champion', 'Uniqlo', 'Hollister', 'Abercrombie & Fitch|abercrombie', 'American Eagle', 'Burberry', 'Patagonia', 'Columbia', 'Armani', 'Hermes', 'Dior', 'Balenciaga', 'Lacoste', 'Skechers', 'Timberland', 'Off-White', 'Fila', 'Asics', 'Dolce & Gabbana|dolce and gabbana', 'Fendi', 'Yeezy', 'Carhartt', 'Banana Republic', 'J.Crew', 'Givenchy', 'Stussy', 'A Bathing Ape|bape', 'Kappa', 'Le Coq Sportif', 'Hoka', 'On Running', 'Saucony', 'Mizuno', 'Umbro', 'Ellesse', 'Diadora'] },
+  { id: 'apps', category: 'WORLD', prompt: 'Name an app or website', rankedBy: 'monthly active users and download charts', ranked: ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Google', 'Snapchat', 'Twitter|x', 'WhatsApp', 'Netflix', 'Spotify', 'Amazon', 'Reddit', 'Pinterest', 'Discord', 'LinkedIn', 'Uber', 'Gmail', 'Zoom', 'Twitch', 'Wikipedia', 'Messenger', 'Telegram', 'Duolingo', 'Roblox', 'eBay', 'Airbnb', 'Venmo', 'PayPal', 'Tinder', 'Shazam', 'Waze', 'Google Maps', 'Threads', 'DoorDash', 'Lyft', 'Hulu', 'Disney+|disney plus', 'Pandora', 'Grubhub', 'Tumblr', 'Etsy', 'Yelp', 'BeReal', 'Signal', 'Slack', 'Dropbox', 'Skype', 'Vimeo', 'Quora', 'Cash App', 'Robinhood', 'Strava', 'Letterboxd', 'Goodreads', 'Bumble', 'Hinge', 'Nextdoor', 'Flickr', 'MySpace', 'Vine', 'Clubhouse', 'Mastodon', 'Bluesky'] },
+  { id: 'holidays', category: 'WORLD', prompt: 'Name a holiday or festival', rankedBy: 'US/UK observance and greeting-card sales, then global festivals', ranked: ['Christmas', 'Halloween', 'Thanksgiving', 'Easter', "New Year's Day|new years", "Valentine's Day|valentines", 'Fourth of July|independence day|july 4th', 'Hanukkah|chanukah', "St. Patrick's Day|saint patricks day", "Mother's Day", "Father's Day", 'Labor Day', 'Memorial Day', 'Christmas Eve', "New Year's Eve", 'Diwali', 'Ramadan', 'Eid|eid al fitr', 'Martin Luther King Jr. Day|mlk day', 'Kwanzaa', 'Passover', 'Lunar New Year|chinese new year', 'Cinco de Mayo', 'Veterans Day', "Presidents' Day", 'Groundhog Day', 'Columbus Day|indigenous peoples day', 'Mardi Gras', 'Earth Day', "April Fools' Day|april fools", 'Boxing Day', 'Yom Kippur', 'Rosh Hashanah', 'Day of the Dead|dia de los muertos', 'Juneteenth', 'Good Friday', 'Holi', 'Oktoberfest', 'Bastille Day', 'Canada Day', 'Bonfire Night|guy fawkes night', 'Ash Wednesday', 'Pi Day', 'Arbor Day', 'Flag Day', 'Purim', 'Hanami', 'Vesak', 'Songkran', 'Obon', 'Nowruz', 'Epiphany', 'Festivus'] },
 ];
+
+const buildRankedPrompt = (p) => {
+  const seen = new Set();
+  const entries = p.ranked.filter((e) => {
+    const key = e.split('|')[0].toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const n = entries.length;
+  return {
+    id: p.id,
+    category: p.category,
+    prompt: p.prompt,
+    rankedBy: p.rankedBy,
+    answers: entries.map((entry, i) => {
+      const [text, ...aliases] = entry.split('|');
+      const share = (i + 0.5) / n; // position in the list, 0 = most common
+      const tier = 1 + RARITY_CUTOFFS.filter((c) => share >= c).length;
+      return { text, aliases, tier, rank: i + 1 };
+    }),
+  };
+};
+
+export const TRIVIA_BANK = [...CUSTOM_PROMPTS, ...RANKED_PROMPTS.map(buildRankedPrompt)];
 
 /* =============================================================================
    2. GAME_CONFIG  (tune the feel of the game here)
@@ -1493,6 +1341,8 @@ export function normalizeAnswer(s) {
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .replace(/&/g, ' and ')
+    .replace(/\+/g, ' plus ')
+    .replace(/#/g, ' sharp ')
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -1538,13 +1388,21 @@ function candidatesFor(prompt) {
 export function matchAnswer(guess, prompt) {
   const g = normalizeAnswer(guess);
   if (!g) return null;
+  // also try simple singular forms: "cherries" -> "cherry", "foxes" -> "fox", "dogs" -> "dog"
+  const variants = [[g, 0]];
+  if (g.length > 4 && g.endsWith('ies')) variants.push([`${g.slice(0, -3)}y`, 0.25]);
+  if (g.length > 4 && g.endsWith('es')) variants.push([g.slice(0, -2), 0.25]);
+  if (g.length > 3 && g.endsWith('s')) variants.push([g.slice(0, -1), 0.25]);
   let best = null;
   for (const { idx, n } of candidatesFor(prompt)) {
-    const max = allowedTypos(Math.min(g.length, n.length));
-    const d = levenshtein(g, n, max);
-    if (d > max) continue;
-    const ans = prompt.answers[idx];
-    if (!best || d < best.dist || (d === best.dist && ans.tier > best.answer.tier)) best = { idx, answer: ans, dist: d };
+    for (const [v, penalty] of variants) {
+      const max = allowedTypos(Math.min(v.length, n.length));
+      const d = levenshtein(v, n, max);
+      if (d > max) continue;
+      const score = d + penalty;
+      const ans = prompt.answers[idx];
+      if (!best || score < best.dist || (score === best.dist && ans.tier > best.answer.tier)) best = { idx, answer: ans, dist: score };
+    }
   }
   return best;
 }
@@ -2466,6 +2324,8 @@ function inkFor(hex) {
 }
 const TONE_COLORS = { great: '#06d6a0', good: '#4cc9f0', meh: '#f4a261', bad: '#ef476f' };
 const FONT_STYLE = { fontFamily: PIXEL_FONT };
+// Side gutter that also clears a phone's side system bar.
+const GUTTER = { paddingLeft: 'max(16px, env(safe-area-inset-left, 0px))', paddingRight: 'max(16px, env(safe-area-inset-right, 0px))' };
 
 // Where the source lives, and a standalone single-file copy that runs offline.
 const REPO_URL = 'https://github.com/siddharthsivaramancode/krillion-sports-spinoff';
@@ -2476,7 +2336,7 @@ function SideLinks() {
   return (
     <>
       {/* desktop: a rail pinned to the right edge */}
-      <nav aria-label="Project links" className="fixed top-1/2 z-30 hidden -translate-y-1/2 flex-col gap-2 lg:flex" style={{ right: 'max(8px, env(safe-area-inset-right, 0px))' }}>
+      <nav aria-label="Project links" className="fixed top-1/2 z-30 hidden -translate-y-1/2 flex-col gap-2 2xl:flex" style={{ right: 'max(8px, env(safe-area-inset-right, 0px))' }}>
         <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className={link} style={{ ...FONT_STYLE, writingMode: 'vertical-rl' }}>
           GITHUB ↗
         </a>
@@ -2485,7 +2345,7 @@ function SideLinks() {
         </a>
       </nav>
       {/* phones/tablets: compact links in the top bar */}
-      <span className="flex gap-2 lg:hidden">
+      <span className="flex gap-2 2xl:hidden">
         <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className="border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] text-white shadow-[2px_2px_0_#000]" style={FONT_STYLE}>
           GITHUB
         </a>
@@ -2647,7 +2507,7 @@ function SetupScreen({ initial, onStart }) {
     onStart({ ...setup, teams });
   };
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
       <div className="text-center">
         <h1 className="text-2xl leading-relaxed text-[#ffd23f] sm:text-4xl" style={{ textShadow: '4px 4px 0 #e63946, 8px 8px 0 #000' }}>
           RETRO CLASH
@@ -2929,31 +2789,41 @@ function CpuPanel({ prompt, team }) {
 }
 
 function AnswerBoard({ prompt, used, highlightIdx }) {
-  const byTier = [5, 4, 3, 2, 1].map((tier) => ({ tier, list: prompt.answers.map((a, idx) => ({ a, idx })).filter(({ a }) => a.tier === tier) }));
+  const SHOW = 6;
   return (
     <div className="mt-3 border-2 border-black bg-black/60 p-2">
-      <div className="mb-2 text-[8px] text-slate-400">THE BOARD</div>
+      <div className="mb-2 flex flex-wrap justify-between gap-2 text-[8px] text-slate-400">
+        <span>THE BOARD · {prompt.answers.length} VALID ANSWERS</span>
+        {prompt.rankedBy && <span className="text-slate-500">RANKED BY {prompt.rankedBy.toUpperCase()}</span>}
+      </div>
       <div className="flex flex-col gap-1">
-        {byTier.map(({ tier, list }) => (
-          <div key={tier} className="flex flex-wrap items-center gap-1">
-            <span className="w-6 text-[8px]" style={{ color: GAME_CONFIG.tiers[tier].color }}>
-              T{tier}
-            </span>
-            {list.map(({ a, idx }) => {
-              const isUsed = used.has(usedKey(prompt.id, idx));
-              const hl = idx === highlightIdx;
-              return (
-                <span
-                  key={idx}
-                  className={`border px-1 py-[2px] text-[8px] ${hl ? 'border-white text-black' : 'border-slate-700'} ${isUsed && !hl ? 'text-slate-600 line-through' : hl ? '' : 'text-slate-200'}`}
-                  style={hl ? { background: GAME_CONFIG.tiers[tier].color } : undefined}
-                >
-                  {a.text}
-                </span>
-              );
-            })}
-          </div>
-        ))}
+        {[5, 4, 3, 2, 1].map((tier) => {
+          const all = prompt.answers.map((a, idx) => ({ a, idx })).filter(({ a }) => a.tier === tier);
+          const isUsed = ({ idx }) => used.has(usedKey(prompt.id, idx));
+          const hl = all.filter(({ idx }) => idx === highlightIdx);
+          const rest = all.filter(({ idx }) => idx !== highlightIdx).sort((x, y) => Number(isUsed(x)) - Number(isUsed(y)));
+          const shown = [...hl, ...rest].slice(0, SHOW);
+          return (
+            <div key={tier} className="flex flex-wrap items-center gap-1">
+              <span className="w-14 shrink-0 text-[8px]" style={{ color: GAME_CONFIG.tiers[tier].color }}>
+                T{tier} ({all.length})
+              </span>
+              {shown.map((x) => {
+                const h = x.idx === highlightIdx;
+                return (
+                  <span
+                    key={x.idx}
+                    className={`border px-1 py-[2px] text-[8px] ${h ? 'border-white text-black' : 'border-slate-700'} ${isUsed(x) && !h ? 'text-slate-600 line-through' : h ? '' : 'text-slate-200'}`}
+                    style={h ? { background: GAME_CONFIG.tiers[tier].color } : undefined}
+                  >
+                    {x.a.text}
+                  </span>
+                );
+              })}
+              {all.length > shown.length && <span className="text-[8px] text-slate-500">+{all.length - shown.length} MORE</span>}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -3311,7 +3181,7 @@ function GameScreen({ setup, onExit, onRematch, career }) {
   const result = g.result;
 
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className="mx-auto w-full" style={{ maxWidth: 'max(min(100%, 560px), min(1500px, calc((100dvh - 330px) * 1.7778)))' }}>
       <Scoreboard teams={teams} engine={engine} sportState={phase === 'animating' && g.shownSport ? g.shownSport : g.sport} activeTeam={phase === 'over' ? null : activeTeam} />
       <div className="relative">
         <GameCanvas timeline={timeline} onEnd={handleAnimEnd} />
@@ -3503,63 +3373,190 @@ function TeamBadge({ team, head = 'helmet', scale = 3 }) {
   );
 }
 
-function HomeTab({ career, onPlay, act }) {
+function MatchPreview({ sport, teams }) {
+  const timeline = useMemo(() => {
+    const scene = sport === 'football' ? { sport, offense: 0, yard: 20, toGo: 10 } : sport === 'tennis' ? { sport, hitter: 0, ys: [110, 110] } : { sport, kicker: 0 };
+    return buildIdle(scene, teams);
+  }, [sport, teams]);
+  return <GameCanvas timeline={timeline} onEnd={() => {}} />;
+}
+
+function SeasonCard({ career }) {
+  const weeks = seasonWeeks(career);
+  const done = career.phase === 'regular' ? career.week : weeks;
+  const roster = teamPlayers(career, 0);
+  const wages = roster.reduce((s, p) => s + p.salary, 0);
+  const phase = career.phase === 'regular' ? 'REGULAR SEASON' : career.phase === 'playoffs' ? 'PLAYOFFS' : 'OFF-SEASON';
+  return (
+    <Panel title={`SEASON ${career.season}`} right={phase}>
+      <div className="mb-1 flex justify-between text-[8px] text-slate-400">
+        <span>WEEKS PLAYED</span>
+        <span>
+          {done}/{weeks}
+        </span>
+      </div>
+      <div className="h-3 w-full border-2 border-black bg-black">
+        <div className="h-full bg-[#06d6a0]" style={{ width: `${(done / weeks) * 100}%` }} />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-[8px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {[
+          ['COINS', `${career.coins.toLocaleString()}c`, '#ffd23f'],
+          ['WAGES / MATCH', `${wages}c`, '#ef476f'],
+          ['ROSTER', `${roster.length}/${CAREER_CONFIG.rosterMax}`, '#fff'],
+          ['TITLES', career.history.filter((h) => h.won).length, '#ffd23f'],
+        ].map(([k, v, c]) => (
+          <div key={k} className="border-2 border-black bg-black/40 p-2">
+            <div className="text-slate-500">{k}</div>
+            <div className="mt-1 text-[11px]" style={{ color: c }}>
+              {v}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function MiniStandings({ career, onOpen }) {
+  const st = standings(career);
+  return (
+    <Panel
+      title="STANDINGS"
+      right={
+        <button type="button" onClick={onOpen} className="underline hover:text-white">
+          FULL TABLE ▶
+        </button>
+      }
+    >
+      <table className="w-full text-[8px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        <tbody>
+          {st.map((r, k) => {
+            const t = career.teams[r.i];
+            return (
+              <tr key={r.i} className={`border-t border-black ${k === 3 ? 'border-b-2 border-b-[#ffd23f]' : ''}`}>
+                <td className="w-5 py-1 text-slate-500">{k + 1}</td>
+                <td className="py-1">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="inline-block h-2 w-2 shrink-0 border border-black" style={{ background: t.primary }} />
+                    <span className="truncate" style={{ color: r.i === 0 ? '#ffd23f' : '#e2e8f0' }}>
+                      {t.name}
+                    </span>
+                  </span>
+                </td>
+                <td className="py-1 text-right text-slate-300">
+                  {r.w}-{r.l}-{r.t}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Panel>
+  );
+}
+
+function SquadOverview({ career, onOpen }) {
+  return (
+    <Panel
+      title="YOUR SQUAD"
+      right={
+        <button type="button" onClick={onOpen} className="underline hover:text-white">
+          MANAGE ROSTER ▶
+        </button>
+      }
+    >
+      <div className="grid gap-3 sm:grid-cols-3">
+        {SPORT_IDS.map((sport) => {
+          const starters = activeFor(career, 0, sport);
+          const r = teamRating(career, 0, sport);
+          return (
+            <button key={sport} type="button" onClick={onOpen} className="border-2 border-black bg-[#1b1736] p-3 text-left hover:bg-[#241f48]" style={FONT_STYLE}>
+              <div className="flex items-center justify-between gap-2 text-[9px]">
+                <span className="text-white">
+                  {SPORT_ICON[sport]} {SPORT_ENGINES[sport].label.split(' ')[0]}
+                </span>
+                <span className="text-slate-300">
+                  <StarIcon /> {r.toFixed(1)}
+                </span>
+              </div>
+              <ul className="mt-2 flex flex-col gap-1">
+                {starters.map((p) => (
+                  <li key={p.id} className="truncate text-[7px] text-slate-300">
+                    <Stars n={p.stars} /> {p.name}
+                  </li>
+                ))}
+                {starters.length < CAREER_CONFIG.startersPerSport && <li className="text-[7px] text-[#ef476f]">{CAREER_CONFIG.startersPerSport - starters.length} EMPTY SLOT(S)</li>}
+              </ul>
+            </button>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+function HomeTab({ career, onPlay, act, setTab }) {
   const f = currentFixture(career);
   const rep = career.lastReport;
-  const club = career.teams[0];
   return (
-    <div className="flex flex-col gap-4">
-      {rep && (
-        <Panel title={`MATCH REPORT · ${rep.label}`}>
-          <div className="text-sm leading-relaxed" style={{ color: rep.outcome === 'win' ? '#06d6a0' : rep.outcome === 'loss' ? '#ef476f' : '#ffd23f' }}>
-            {rep.forfeit ? 'FORFEIT' : rep.outcome.toUpperCase()} {rep.scores[0]}-{rep.scores[1]}
-          </div>
-          <div className="mt-1 text-[8px] text-slate-400">
-            {SPORT_ICON[rep.sport]} vs {rep.rival}
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-1 text-[8px] sm:grid-cols-4">
-            <span className="text-slate-300">RESULT +{rep.base}</span>
-            <span className="text-slate-300">RARE ANSWERS +{rep.bonus}</span>
-            {rep.playoffBonus > 0 && <span className="text-[#06d6a0]">PLAYOFF WIN +{rep.playoffBonus}</span>}
-            <span className={rep.paid ? 'text-slate-300' : 'text-[#ef476f]'}>
-              WAGES -{rep.wages}
-              {rep.paid ? '' : ' (UNPAID!)'}
-            </span>
-          </div>
-        </Panel>
-      )}
-
-      {career.phase === 'offseason' ? (
-        <OffseasonPanel career={career} act={act} />
-      ) : f ? (
-        <NextFixture career={career} f={f} onPlay={onPlay} />
-      ) : (
-        <Panel title="WAITING">
-          <div className="text-[9px] text-slate-400">No fixture right now.</div>
-        </Panel>
-      )}
-
-      <Panel title="CLUB NEWS">
-        <ul className="flex flex-col gap-2">
-          {career.news.slice(0, 8).map((n, i) => (
-            <li key={i} className="text-[8px] leading-relaxed text-slate-300">
-              {n}
-            </li>
-          ))}
-        </ul>
-      </Panel>
-      {career.history.length > 0 && (
-        <Panel title="TROPHY CABINET">
-          <ul className="flex flex-col gap-1 text-[8px] text-slate-300">
-            {career.history.map((h) => (
-              <li key={h.season}>
-                S{h.season}: {h.won ? <span className="text-[#ffd23f]">🏆 CHAMPIONS</span> : `finished #${h.finish} · champion ${h.champion}`}
+    <div className="grid gap-4 lg:grid-cols-3">
+      <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
+        {career.phase === 'offseason' ? (
+          <OffseasonPanel career={career} act={act} />
+        ) : f ? (
+          <NextFixture career={career} f={f} onPlay={onPlay} />
+        ) : (
+          <Panel title="WAITING">
+            <div className="text-[9px] text-slate-400">No fixture right now.</div>
+          </Panel>
+        )}
+        {rep && (
+          <Panel title={`LAST RESULT · ${rep.label}`}>
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <div className="text-base leading-relaxed sm:text-xl" style={{ color: rep.outcome === 'win' ? '#06d6a0' : rep.outcome === 'loss' ? '#ef476f' : '#ffd23f' }}>
+                {rep.forfeit ? 'FORFEIT' : rep.outcome.toUpperCase()} {rep.scores[0]}-{rep.scores[1]}
+              </div>
+              <div className="text-[8px] text-slate-400">
+                {SPORT_ICON[rep.sport]} vs {rep.rival}
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-1 text-[8px] sm:grid-cols-4">
+              <span className="text-slate-300">RESULT +{rep.base}</span>
+              <span className="text-slate-300">RARE ANSWERS +{rep.bonus}</span>
+              {rep.playoffBonus > 0 && <span className="text-[#06d6a0]">PLAYOFF WIN +{rep.playoffBonus}</span>}
+              <span className={rep.paid ? 'text-slate-300' : 'text-[#ef476f]'}>
+                WAGES -{rep.wages}
+                {rep.paid ? '' : ' (UNPAID!)'}
+              </span>
+            </div>
+          </Panel>
+        )}
+        <SquadOverview career={career} onOpen={() => setTab('roster')} />
+      </div>
+      <div className="flex min-w-0 flex-col gap-4">
+        <SeasonCard career={career} />
+        <MiniStandings career={career} onOpen={() => setTab('league')} />
+        <Panel title="CLUB NEWS">
+          <ul className="flex flex-col gap-2">
+            {career.news.slice(0, 7).map((n, i) => (
+              <li key={i} className="text-[8px] leading-relaxed text-slate-300">
+                {n}
               </li>
             ))}
           </ul>
         </Panel>
-      )}
-      <div className="sr-only">{club.name}</div>
+        {career.history.length > 0 && (
+          <Panel title="TROPHY CABINET">
+            <ul className="flex flex-col gap-1 text-[8px] text-slate-300">
+              {career.history.map((h) => (
+                <li key={h.season}>
+                  S{h.season}: {h.won ? <span className="text-[#ffd23f]">🏆 CHAMPIONS</span> : `finished #${h.finish} · champion ${h.champion}`}
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        )}
+      </div>
     </div>
   );
 }
@@ -3574,12 +3571,19 @@ function NextFixture({ career, f, onPlay }) {
   const theirR = teamRating(career, rivalIdx, f.sport);
   const engine = SPORT_ENGINES[f.sport];
   const label = career.phase === 'playoffs' ? f.label : `WEEK ${career.week + 1} OF ${seasonWeeks(career)}`;
+  const previewTeams = useMemo(
+    () => [
+      { name: club.name, primary: club.primary, secondary: club.secondary },
+      { name: rival.name, primary: rival.primary, secondary: rival.secondary },
+    ],
+    [club.name, club.primary, club.secondary, rival.name, rival.primary, rival.secondary]
+  );
   const unit = (team, players, rating, isMine) => (
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-2">
         <TeamBadge team={team} head={engine.head} />
         <div className="min-w-0">
-          <div className="truncate text-[9px]" style={{ color: inkFor(team.primary) }}>
+          <div className="truncate text-[10px] sm:text-xs" style={{ color: inkFor(team.primary) }}>
             {team.name}
           </div>
           <div className="mt-1 text-[8px] text-slate-400">
@@ -3589,28 +3593,34 @@ function NextFixture({ career, f, onPlay }) {
       </div>
       <ul className="mt-2 flex flex-col gap-1">
         {players.map((p) => (
-          <li key={p.id} className="text-[7px] leading-relaxed text-slate-300">
+          <li key={p.id} className="text-[7px] leading-relaxed text-slate-300 sm:text-[8px]">
             <Stars n={p.stars} /> {p.name} · <span style={{ color: KIND_COLOR[ABILITIES[p.ability.key].kind] }}>{abilityName(p.ability)}</span>
           </li>
         ))}
-        {isMine && players.length < CAREER_CONFIG.startersPerSport && (
-          <li className="text-[7px] text-[#ef476f]">
-            {CAREER_CONFIG.startersPerSport - players.length} EMPTY STARTER SLOT{CAREER_CONFIG.startersPerSport - players.length > 1 ? 'S' : ''}: SET STARTERS IN ROSTER
-          </li>
-        )}
+        {isMine && players.length < CAREER_CONFIG.startersPerSport && <li className="text-[7px] text-[#ef476f]">EMPTY STARTER SLOT: SET STARTERS IN ROSTER</li>}
       </ul>
     </div>
   );
   return (
     <Panel title={`NEXT UP · ${label}`} right={`${engine.icon} ${engine.label}`}>
-      <div className="flex flex-col gap-4 sm:flex-row">
+      <div className="relative">
+        <MatchPreview sport={f.sport} teams={previewTeams} />
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+          <span className="border-2 border-black bg-black/75 px-3 py-1 text-[9px] text-[#ffd23f] sm:text-xs">
+            {club.name} vs {rival.name}
+          </span>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-col gap-4 sm:flex-row">
         {unit(club, mine, myR, true)}
         <div className="self-center text-[10px] text-slate-500">VS</div>
         {unit(rival, theirs, theirR, false)}
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="text-[8px] leading-relaxed text-slate-400">{myR >= theirR + 0.4 ? 'FAVOURITES. Don\'t get countered.' : theirR >= myR + 0.4 ? 'UNDERDOGS. Go for the rare answers.' : 'EVEN MATCHUP.'}</div>
-        <PixelButton onClick={() => onPlay(f)}>▶ PLAY MATCH</PixelButton>
+        <div className="text-[8px] leading-relaxed text-slate-400">{myR >= theirR + 0.4 ? "FAVOURITES. Don't get countered." : theirR >= myR + 0.4 ? 'UNDERDOGS. Go for the rare answers.' : 'EVEN MATCHUP.'}</div>
+        <PixelButton onClick={() => onPlay(f)} className="px-8 text-sm">
+          ▶ PLAY MATCH
+        </PixelButton>
       </div>
     </Panel>
   );
@@ -3678,7 +3688,7 @@ function RosterTab({ career, act }) {
             {list.length === 0 ? (
               <div className="text-[8px] text-[#ef476f]">No {sport} players. Sign some in the MARKET or poach from LEAGUE rivals.</div>
             ) : (
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {list.map((p) => (
                   <PlayerCard
                     key={p.id}
@@ -3726,7 +3736,7 @@ function MarketTab({ career, act }) {
       <div className="mb-3 text-[8px] leading-relaxed text-slate-400">
         5-star players are rare and expensive. Everyone has a unique ability. {full && <span className="text-[#ef476f]">Your roster is full: sell someone first.</span>}
       </div>
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {career.freeAgents
           .map((id) => career.players[id])
           .sort((a, b) => b.stars - a.stars)
@@ -3794,7 +3804,7 @@ function LeagueTab({ career, act }) {
       </Panel>
       {open !== null && (
         <Panel title={`${career.teams[open].name} ROSTER`} right="MAKE AN OFFER TO POACH A PLAYER">
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {teamPlayers(career, open)
               .sort((a, b) => b.stars - a.stars)
               .map((p) => (
@@ -3862,7 +3872,7 @@ function ScheduleTab({ career }) {
   );
 }
 
-function CareerHub({ career, setCareer, onPlay }) {
+function CareerHub({ career, setCareer, onPlay, onHelp }) {
   const [tab, setTab] = useState('home');
   const [flash, setFlash] = useState(null);
   const club = career.teams[0];
@@ -3888,25 +3898,34 @@ function CareerHub({ career, setCareer, onPlay }) {
     ['league', 'LEAGUE'],
     ['schedule', 'SCHEDULE'],
   ];
+  const stat = (k, v, c = '#fff') => (
+    <div className="border-2 border-black bg-black/50 px-3 py-2">
+      <div className="text-[7px] text-slate-500">{k}</div>
+      <div className="mt-1 text-[10px] sm:text-sm" style={{ color: c, fontVariantNumeric: 'tabular-nums' }}>
+        {v}
+      </div>
+    </div>
+  );
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
-      <header className="border-4 border-black bg-[#120f26] p-3 shadow-[4px_4px_0_#000]">
-        <div className="flex items-center gap-3">
-          <TeamBadge team={club} scale={4} />
+    <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4">
+      <header className="border-4 border-black bg-[#120f26] p-3 shadow-[4px_4px_0_#000] sm:p-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <TeamBadge team={club} scale={6} />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm sm:text-lg" style={{ color: inkFor(club.primary), textShadow: '2px 2px 0 #000' }}>
+            <div className="text-[8px] text-slate-500">CLUBHOUSE</div>
+            <div className="truncate text-lg sm:text-3xl" style={{ color: inkFor(club.primary), textShadow: '3px 3px 0 #000' }}>
               {club.name}
             </div>
-            <div className="mt-2 text-[8px] leading-relaxed text-slate-400" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              SEASON {career.season} · {phaseLabel} · {me.w}-{me.l}-{me.t} · #{rank} OF {career.teams.length}
-            </div>
           </div>
-          <div className="shrink-0 border-2 border-black bg-black px-2 py-2 text-[10px] text-[#ffd23f]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-            {career.coins.toLocaleString()}c
+          <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 lg:w-auto">
+            {stat('SEASON', `${career.season} · ${phaseLabel}`)}
+            {stat('RECORD', `${me.w}-${me.l}-${me.t}`)}
+            {stat('RANK', `#${rank} OF ${career.teams.length}`, rank <= 4 ? '#06d6a0' : '#fff')}
+            {stat('COINS', `${career.coins.toLocaleString()}c`, '#ffd23f')}
           </div>
         </div>
       </header>
-      <nav className="flex gap-2 overflow-x-auto pb-1" aria-label="Clubhouse">
+      <nav className="grid grid-cols-3 gap-2 sm:grid-cols-6" aria-label="Clubhouse">
         {tabs.map(([id, label]) => (
           <button
             key={id}
@@ -3916,19 +3935,22 @@ function CareerHub({ career, setCareer, onPlay }) {
               SOUND_ENGINE.play('select');
               setTab(id);
             }}
-            className={`shrink-0 border-4 border-black px-3 py-2 text-[9px] shadow-[3px_3px_0_#000] ${tab === id ? 'bg-[#ffd23f] text-black' : 'bg-[#1b1736] text-white'}`}
+            className={`border-4 border-black px-2 py-3 text-[9px] shadow-[3px_3px_0_#000] sm:text-[11px] ${tab === id ? 'bg-[#ffd23f] text-black' : 'bg-[#1b1736] text-white hover:bg-[#241f48]'}`}
             style={FONT_STYLE}
           >
             {label}
           </button>
         ))}
+        <button type="button" onClick={onHelp} className="border-4 border-black bg-[#06d6a0] px-2 py-3 text-[9px] text-black shadow-[3px_3px_0_#000] sm:text-[11px]" style={FONT_STYLE}>
+          ? HELP
+        </button>
       </nav>
       {flash && (
         <div role="status" className="border-2 border-black bg-black px-3 py-2 text-[8px] leading-relaxed" style={{ color: flash.ok ? '#06d6a0' : '#ef476f' }}>
           {flash.text}
         </div>
       )}
-      {tab === 'home' && <HomeTab career={career} onPlay={onPlay} act={act} />}
+      {tab === 'home' && <HomeTab career={career} onPlay={onPlay} act={act} setTab={setTab} />}
       {tab === 'roster' && <RosterTab career={career} act={act} />}
       {tab === 'market' && <MarketTab career={career} act={act} />}
       {tab === 'league' && <LeagueTab career={career} act={act} />}
@@ -3948,7 +3970,7 @@ function NewCareerScreen({ hasSave, onCreate, onBack }) {
     onCreate({ ...club, name: club.name.trim() || 'MY CLUB' });
   };
   return (
-    <div className="mx-auto flex max-w-xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
       <h1 className="text-center text-lg leading-relaxed text-[#ffd23f] sm:text-2xl" style={{ textShadow: '3px 3px 0 #e63946, 6px 6px 0 #000' }}>
         FOUND YOUR CLUB
       </h1>
@@ -3966,42 +3988,398 @@ function NewCareerScreen({ hasSave, onCreate, onBack }) {
   );
 }
 
-function TitleScreen({ career, onContinue, onNew, onQuick }) {
-  const [frame, setFrame] = useState(0);
+const DEMO_TEAMS = [
+  { name: 'NEON KNIGHTS', primary: '#e63946', secondary: '#fcbf49' },
+  { name: 'LASER SHARKS', primary: '#00b4d8', secondary: '#ffd60a' },
+];
+const DEMO_PLAYS = [
+  { sport: 'football', offense: 0, from: 22, toGo: 10, type: 'pass', to: 100, td: true, banner: 'TOUCHDOWN!', tone: 'great' },
+  { sport: 'soccer', kicker: 1, result: 'goal', gx: -0.86, gy: 0.9, flight: 0.3, diveDir: 1, diveHigh: false, banner: 'TOP BINS!' },
+  { sport: 'tennis', hitter: 0, fromY: 110, recvY: 104, toY: 110, result: 'ace', banner: 'ACE!', serve: true, errorType: 'net' },
+  { sport: 'football', offense: 1, from: 30, toGo: 10, type: 'pick6', tone: 'bad' },
+];
+
+// Silent attract-mode loop of real game animations behind the title screen.
+function StadiumBackdrop() {
+  const ref = useRef(null);
   useEffect(() => {
-    const id = setInterval(() => setFrame((f) => (f + 1) % 4), 200);
-    return () => clearInterval(id);
+    const ctx = ref.current.getContext('2d');
+    let raf;
+    let idx = 0;
+    let tl = buildTimeline(DEMO_PLAYS[0], DEMO_TEAMS);
+    let t0 = performance.now();
+    const loop = (now) => {
+      let t = (now - t0) / 1000;
+      if (t > tl.duration + 0.9) {
+        idx = (idx + 1) % DEMO_PLAYS.length;
+        tl = buildTimeline(DEMO_PLAYS[idx], DEMO_TEAMS);
+        t0 = now;
+        t = 0;
+      }
+      try {
+        renderFrame(ctx, tl, Math.min(t, tl.duration), now / 1000);
+      } catch (e) {
+        /* decorative only */
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
   }, []);
-  const poses = ['run1', 'stand', 'run2', 'stand'];
+  return <canvas ref={ref} width={CW} height={CH} aria-hidden="true" className="absolute inset-0 h-full w-full object-cover" style={{ imageRendering: 'pixelated' }} />;
+}
+
+function MenuTile({ title, sub, color, onClick, big }) {
   return (
-    <div className="mx-auto flex max-w-xl flex-col items-center gap-6 py-6 text-center">
-      <div>
-        <h1 className="text-3xl leading-relaxed text-[#ffd23f] sm:text-5xl" style={{ textShadow: '4px 4px 0 #e63946, 8px 8px 0 #000' }}>
-          RETRO CLASH
-        </h1>
-        <div className="mt-2 text-sm text-[#4cc9f0] sm:text-lg" style={{ textShadow: '3px 3px 0 #000' }}>
-          TRIVIA BOWL
+    <button
+      type="button"
+      onClick={() => {
+        SOUND_ENGINE.unlock();
+        SOUND_ENGINE.play('select');
+        onClick();
+      }}
+      className={`group flex w-full flex-col gap-2 border-4 border-black text-left text-black shadow-[6px_6px_0_#000] transition-transform hover:-translate-y-1 active:translate-x-[3px] active:translate-y-[3px] active:shadow-[3px_3px_0_#000] ${big ? 'px-6 py-6' : 'px-5 py-5'}`}
+      style={{ background: color, ...FONT_STYLE }}
+    >
+      <span className={big ? 'text-base sm:text-2xl' : 'text-sm sm:text-lg'}>{title}</span>
+      <span className="text-[8px] leading-relaxed text-black/70 sm:text-[9px]">{sub}</span>
+    </button>
+  );
+}
+
+function TitleScreen({ career, onContinue, onNew, onQuick, onTutorial }) {
+  const answerCount = useMemo(() => TRIVIA_BANK.reduce((s, p) => s + p.answers.length, 0), []);
+  const categories = useMemo(() => new Set(TRIVIA_BANK.map((p) => p.category)).size, []);
+  return (
+    <div className="relative flex flex-1 flex-col overflow-hidden">
+      <StadiumBackdrop />
+      <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(13,11,30,0.82) 0%, rgba(13,11,30,0.55) 40%, rgba(13,11,30,0.9) 78%, #0d0b1e 100%)' }} />
+      <div style={GUTTER} className="relative z-10 flex flex-1 flex-col items-center justify-center gap-6 py-8 text-center sm:gap-8">
+        <div>
+          <h1 className="text-[#ffd23f]" style={{ fontSize: 'clamp(2.4rem, 9vw, 8rem)', lineHeight: 1.05, textShadow: '0.06em 0.06em 0 #e63946, 0.12em 0.12em 0 #000' }}>
+            RETRO CLASH
+          </h1>
+          <div className="mt-3 text-[#4cc9f0]" style={{ fontSize: 'clamp(1rem, 3.4vw, 2.6rem)', textShadow: '0.08em 0.08em 0 #000' }}>
+            TRIVIA BOWL
+          </div>
+          <p className="mx-auto mt-4 max-w-2xl text-[9px] leading-relaxed text-slate-200 sm:text-xs">Name the answer nobody else would. Rare answers score touchdowns, aces and top-bins goals. Obvious ones get intercepted.</p>
+        </div>
+        <div className="grid w-full max-w-4xl gap-4 sm:grid-cols-2">
+          {career ? (
+            <MenuTile big title={`▶ CONTINUE CAREER`} sub={`${career.teams[0].name} · SEASON ${career.season} · ${career.coins.toLocaleString()} COINS`} color="#ffd23f" onClick={onContinue} />
+          ) : (
+            <MenuTile big title="▶ START A CAREER" sub="Found a club, sign players with unique abilities and chase the title across all 3 sports." color="#ffd23f" onClick={onNew} />
+          )}
+          <MenuTile big title="QUICK MATCH" sub="One game. Pick a sport, colors and play vs the CPU or a friend on the same device." color="#c77dff" onClick={onQuick} />
+          {career && <MenuTile title="NEW CAREER" sub="Start over with a new club (replaces your current save)." color="#4cc9f0" onClick={onNew} />}
+          <div className={career ? '' : 'sm:col-span-2'}>
+            <MenuTile title="? HOW TO PLAY" sub="Tiers, counter-attacks, all three sports, and how career mode works." color="#06d6a0" onClick={onTutorial} />
+          </div>
         </div>
       </div>
-      <div className="flex items-end gap-3 border-4 border-black bg-[#3d9140] px-4 pt-3 shadow-[4px_4px_0_#000]">
-        <SpritePreview primary="#e63946" secondary="#fcbf49" head="helmet" pose={poses[frame]} />
-        <SpritePreview primary="#457b9d" secondary="#f1faee" head="hair" pose={poses[(frame + 2) % 4]} skin="#8d5524" hair="#1a1a1a" />
-        <SpritePreview primary="#06d6a0" secondary="#1d3557" head="hair" pose={frame % 2 ? 'armsUp' : 'stand'} skin="#ffdbac" hair="#d9a441" />
+      <div style={GUTTER} className="relative z-10 grid gap-3 pb-6 sm:grid-cols-3">
+        {Object.values(SPORT_ENGINES).map((e) => (
+          <div key={e.id} className="flex items-start gap-3 border-4 border-black bg-[#1b1736]/90 p-3 shadow-[4px_4px_0_#000]">
+            <span className="text-2xl" aria-hidden="true">
+              {e.icon}
+            </span>
+            <div className="min-w-0">
+              <div className="text-[10px] text-[#ffd23f]">{e.label}</div>
+              <div className="mt-1 text-[8px] leading-relaxed text-slate-300">{e.blurb}</div>
+            </div>
+          </div>
+        ))}
+        <div className="text-center text-[8px] text-slate-400 sm:col-span-3" style={{ fontVariantNumeric: 'tabular-nums' }}>
+          {TRIVIA_BANK.length} PROMPTS · {answerCount.toLocaleString()} RANKED ANSWERS · {categories} CATEGORIES · CAREER SAVES IN THIS BROWSER
+        </div>
       </div>
-      <div className="flex w-full max-w-xs flex-col gap-3">
-        {career && (
-          <PixelButton onClick={onContinue}>
-            ▶ CONTINUE · {career.teams[0].name} S{career.season}
-          </PixelButton>
+    </div>
+  );
+}
+
+const TUTORIAL_SEEN_KEY = 'retro-clash-tutorial-seen';
+const pctOf = (x) => `${Math.round(x * 100)}%`;
+
+function TutTable({ rows, head }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-2 border-black text-left text-[8px] sm:text-[9px]">
+        {head && (
+          <thead className="bg-black text-slate-400">
+            <tr>
+              {head.map((h) => (
+                <th key={h} className="px-2 py-1">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
         )}
-        <PixelButton onClick={onNew} color={career ? '#4cc9f0' : '#ffd23f'}>
-          NEW CAREER
-        </PixelButton>
-        <PixelButton onClick={onQuick} color="#c77dff">
-          QUICK MATCH
-        </PixelButton>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} className="border-t border-black/70 align-top">
+              {r.map((c, j) => (
+                <td key={j} className="px-2 py-2 leading-relaxed text-slate-200">
+                  {c}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function tutorialPages() {
+  const C = GAME_CONFIG;
+  const F = C.football;
+  const T = C.tennis;
+  const S = C.soccer;
+  const CC = CAREER_CONFIG;
+  const cut = [0, ...RARITY_CUTOFFS, 1];
+  const sample = TRIVIA_BANK.find((p) => p.id === 'us-states') || TRIVIA_BANK[0];
+  const ex = (tier) =>
+    sample.answers
+      .filter((a) => a.tier === tier)
+      .slice(0, 3)
+      .map((a) => a.text)
+      .join(', ');
+  const chip = (t) => <TierChip tier={t} small />;
+  return [
+    {
+      title: 'WELCOME TO RETRO CLASH',
+      body: (
+        <>
+          <p>Every play starts with a survey-style prompt, like "{sample.prompt}". Type any answer that's on the board before the {C.timerSeconds}-second clock runs out.</p>
+          <p>
+            <span className="text-[#ffd23f]">The rarer your answer, the bigger the play.</span> Name what everybody says and you'll barely move the ball. Name a deep cut and you score.
+          </p>
+          <div className="flex items-end justify-center gap-4 border-4 border-black bg-[#3d9140] px-4 pt-3">
+            <SpritePreview primary="#e63946" secondary="#fcbf49" head="helmet" pose="armsUp" />
+            <SpritePreview primary="#457b9d" secondary="#f1faee" head="hair" pose="run1" skin="#8d5524" hair="#1a1a1a" />
+            <SpritePreview primary="#06d6a0" secondary="#1d3557" head="hair" pose="stand" skin="#ffdbac" hair="#d9a441" />
+          </div>
+        </>
+      ),
+    },
+    {
+      title: 'RARITY TIERS',
+      body: (
+        <>
+          <p>Each prompt lists every valid answer in order from most common to rarest. Each answer's tier comes from its place in that list:</p>
+          <TutTable
+            head={['TIER', 'WHERE IT RANKS', `EXAMPLE: ${sample.prompt.toUpperCase()}`]}
+            rows={[5, 4, 3, 2, 1].map((t) => [chip(t), t === 1 ? `Top ${pctOf(cut[1])} most common` : t === 5 ? `Rarest ${pctOf(1 - cut[4])}` : `${pctOf(cut[t - 1])}-${pctOf(cut[t])} down the list`, ex(t)])}
+          />
+          <p className="text-slate-400">Typing is forgiving: case, accents, punctuation, "the", plurals and small typos are all fine. Nicknames work too (e.g. "Niners", "Philly", "JFK").</p>
+        </>
+      ),
+    },
+    {
+      title: 'THE RISK: COUNTER-ATTACKS',
+      body: (
+        <>
+          <p>Obvious answers are dangerous. When you give one, the other team gets a chance to punish you:</p>
+          <TutTable
+            head={['ANSWER', 'COUNTER CHANCE', 'WHAT HAPPENS']}
+            rows={[
+              [chip(1), pctOf(C.counterAttackChance[1]), 'Pick-six, unreturnable smash, or the keeper steals it for a breakaway goal'],
+              [chip(2), pctOf(C.counterAttackChance[2]), 'Same, just less likely'],
+              [chip(3), '0%', 'Safe, steady play'],
+              ['WRONG / REPEAT', '-', 'Sack, unforced error, or a shot off target. Answers already used this game count as wrong.'],
+              ['TIME RUNS OUT', '-', 'Fumble (turnover), "too slow" error, or a shanked shot'],
+            ]}
+          />
+          <p className="text-[#ffd23f]">Tip: a SOLID (T3) answer is always safe. Only go for the rarest ones when you're sure.</p>
+        </>
+      ),
+    },
+    {
+      title: '🏈 FOOTBALL DRIVE',
+      body: (
+        <>
+          <p>
+            You start at your own {F.startYard} and get 4 downs to gain {F.firstDownYards} yards. Teams swap drives; each team gets {F.drivesPerTeam} drives, with overtime if tied.
+          </p>
+          <TutTable
+            head={['ANSWER', 'RESULT']}
+            rows={[
+              [chip(5), 'Touchdown from anywhere (+7)'],
+              [chip(4), `+${F.yardsByTier[4]} yard diving catch`],
+              [chip(3), `+${F.yardsByTier[3]} yard completion`],
+              [chip(2), `+${F.yardsByTier[2]} yard run, or a PICK SIX if countered`],
+              [chip(1), `+${F.yardsByTier[1]} yard run, or a PICK SIX if countered`],
+              ['WRONG', `Sacked for -${F.sackYards} yards (safety if in your end zone)`],
+              ['TIME UP', 'Fumble: turnover'],
+            ]}
+          />
+        </>
+      ),
+    },
+    {
+      title: '🎾 TENNIS TIEBREAK',
+      body: (
+        <>
+          <p>
+            First to {T.pointsToWin} points, win by {T.winBy}. Every answer is a shot, and the rally goes back and forth until someone wins the point.
+          </p>
+          <TutTable
+            head={['ANSWER', 'RESULT']}
+            rows={[
+              [chip(5), 'Ace on serve, clean winner in a rally'],
+              [chip(4), `Corner winner (${pctOf(T.deepRetrieveChance)} chance they chase it down; then THEY need T3+ or lose the point)`],
+              [chip(3), 'Good return: the rally continues'],
+              ['T1-T2', 'Weak return that can get SMASHED back for a lost point'],
+              ['WRONG / TIME UP', 'Unforced error or double fault'],
+            ]}
+          />
+        </>
+      ),
+    },
+    {
+      title: '⚽ SOCCER SHOOTOUT',
+      body: (
+        <>
+          <p>{S.rounds} penalties each, then sudden death. Your answer sets the power and placement of your shot against a diving keeper.</p>
+          <TutTable
+            head={['ANSWER', 'SHOT', 'SAVE CHANCE']}
+            rows={[
+              [chip(5), 'Top-bins rocket', pctOf(S.shots[5].save)],
+              [chip(4), 'Driven into the corner', pctOf(S.shots[4].save)],
+              [chip(3), 'Placed side-foot', pctOf(S.shots[3].save)],
+              [chip(2), 'Weak, central', `${pctOf(S.shots[2].save)} + steal risk`],
+              [chip(1), 'Tame roller', `${pctOf(S.shots[1].save)} + steal risk`],
+              ['WRONG / TIME UP', 'Wide or over the bar', '-'],
+            ]}
+          />
+          <p className="text-slate-400">A counter-attack here means the keeper catches it and launches a breakaway: the other team gets a bonus goal.</p>
+        </>
+      ),
+    },
+    {
+      title: 'CAREER MODE',
+      body: (
+        <>
+          <p>You run one club across all three sports in an 8-team league.</p>
+          <TutTable
+            rows={[
+              ['SEASON', `${CC.rivals.length} regular-season weeks (you play every rival once). The sport changes every week.`],
+              ['PLAYOFFS', 'The top 4 go to the semifinals, then the championship.'],
+              ['COINS', `Win +${CC.rewards.win}, draw +${CC.rewards.draw}, loss +${CC.rewards.loss}. Every T5 answer +${CC.rewards.tier5}, every T4 +${CC.rewards.tier4}. Playoff win +${CC.rewards.playoffWin}, title +${CC.rewards.title}.`],
+              ['WAGES', 'Every player is paid after every match. If you can\'t pay, morale crashes.'],
+              ['RIVALS', 'Rival clubs sign better players every season, so keep upgrading.'],
+            ]}
+          />
+          <p className="text-slate-400">The CLUBHOUSE has five tabs: HOME (next match + news), ROSTER, MARKET, LEAGUE (standings + scouting) and SCHEDULE.</p>
+        </>
+      ),
+    },
+    {
+      title: 'YOUR PLAYERS',
+      body: (
+        <>
+          <p>
+            Players are rated 1-5 stars. 5-star players are rare ({pctOf(CC.stars[5].weight / Object.values(CC.stars).reduce((s, x) => s + x.weight, 0))} of the market) and expensive. Each one plays a single sport and has their own
+            ability. Only your {CC.startersPerSport} STARTERS per sport use their abilities in a match.
+          </p>
+          <TutTable
+            head={['TYPE', 'EXAMPLES']}
+            rows={[
+              [<span style={{ color: KIND_COLOR.TRIVIA }}>TRIVIA</span>, 'CLOCK MANAGER (+seconds), FILM STUDY (hint for a rare answer), SECOND WIND (retry a wrong answer)'],
+              [<span style={{ color: KIND_COLOR.RISK }}>RISK</span>, 'IRON DEFENSE (fewer counters vs you), BALLHAWK (more counters vs them), CLUTCH GENE (T2 plays as T3), COMPOSURE (wrong answer forgiven)'],
+              [<span style={{ color: KIND_COLOR.STAT }}>STAT</span>, 'BULLDOZER (+yards), BIG SERVE (SOLID shots become winners), FINISHER (beats the keeper)'],
+              [<span style={{ color: KIND_COLOR.SPECIALIST }}>SPECIALIST</span>, 'e.g. GEOGRAPHY BRAIN: answers in that category can jump up a tier'],
+            ]}
+          />
+          <p className="text-slate-400">When an ability fires during a match, a ⚡ line names the player who did it.</p>
+        </>
+      ),
+    },
+    {
+      title: 'BUILDING A DYNASTY',
+      body: (
+        <TutTable
+          rows={[
+            ['MARKET', `${CC.freeAgentsPerWeek} new free agents every week. Pay their fee to sign them.`],
+            ['POACH', 'Scout a rival in LEAGUE and make a LOWBALL, FAIR or BLOCKBUSTER offer. Bigger offers are more likely to be accepted. Players who refuse won\'t talk again until next week.'],
+            ['SELL', `Sell any player for ${pctOf(CC.sellRatio)} of their value, including your free starters.`],
+            ['MORALE', `Wins and starting raise it; losses, the bench and unpaid wages lower it. Below ${CC.morale.unhappyBelow}, a player's ability switches OFF and they won't re-sign.`],
+            ['CONTRACTS', 'When a contract ends you can re-sign the player in the off-season or let them walk. Happy players can gain a star between seasons.'],
+          ]}
+        />
+      ),
+    },
+    {
+      title: 'CONTROLS & TIPS',
+      body: (
+        <TutTable
+          rows={[
+            ['ENTER', 'Submit an answer, continue after a play, start a match'],
+            ['SOUND', 'Toggle in the top bar'],
+            ['2 PLAYERS', 'In QUICK MATCH, choose 2P PASS & PLAY and hand the device over when it asks'],
+            ['SAVING', 'Career progress saves automatically in this browser'],
+            ['STRATEGY', 'Think of the 2nd or 3rd answer that comes to mind, not the 1st. The first thing everyone thinks of is a T1.'],
+          ]}
+        />
+      ),
+    },
+  ];
+}
+
+function Tutorial({ onClose }) {
+  const pages = useMemo(tutorialPages, []);
+  const [i, setI] = useState(0);
+  const close = useCallback(() => {
+    try {
+      window.localStorage.setItem(TUTORIAL_SEEN_KEY, '1');
+    } catch (e) {
+      /* ignore */
+    }
+    onClose();
+  }, [onClose]);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') close();
+      if (e.key === 'ArrowRight' || e.key === 'Enter') setI((x) => (x < pages.length - 1 ? x + 1 : x));
+      if (e.key === 'ArrowLeft') setI((x) => Math.max(0, x - 1));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [close, pages.length]);
+  const page = pages[i];
+  const last = i === pages.length - 1;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 sm:p-6" role="dialog" aria-modal="true" aria-label="How to play">
+      <div className="flex max-h-[94dvh] w-full max-w-3xl flex-col border-4 border-black bg-[#1b1736] shadow-[8px_8px_0_#000]" style={FONT_STYLE}>
+        <div className="flex items-center justify-between gap-3 border-b-4 border-black bg-[#120f26] px-4 py-3">
+          <div className="text-[8px] text-slate-400">
+            HOW TO PLAY · {i + 1}/{pages.length}
+          </div>
+          <button type="button" onClick={close} className="text-[9px] text-slate-300 underline hover:text-white">
+            SKIP ✕
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-4 py-4 sm:px-6">
+          <h2 className="text-sm leading-relaxed text-[#ffd23f] sm:text-xl" style={{ textShadow: '3px 3px 0 #000' }}>
+            {page.title}
+          </h2>
+          <div className="mt-4 flex flex-col gap-4 text-[9px] leading-relaxed text-slate-200 sm:text-[10px]">{page.body}</div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t-4 border-black px-4 py-3">
+          <div className="flex gap-1" aria-hidden="true">
+            {pages.map((_, k) => (
+              <span key={k} className="h-2 w-2 border border-black" style={{ background: k === i ? '#ffd23f' : k < i ? '#4cc9f0' : '#334155' }} />
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <PixelButton onClick={() => setI(Math.max(0, i - 1))} color="#8d99ae" disabled={i === 0}>
+              ◀ BACK
+            </PixelButton>
+            <PixelButton onClick={() => (last ? close() : setI(i + 1))}>{last ? "LET'S PLAY ▶" : 'NEXT ▶'}</PixelButton>
+          </div>
+        </div>
       </div>
-      <p className="max-w-sm text-[8px] leading-relaxed text-slate-500">Rare answers make big plays. Obvious answers invite a counter-attack. Your career saves automatically in this browser.</p>
     </div>
   );
 }
@@ -4014,6 +4392,7 @@ export default function RetroClashTriviaBowl() {
   const [match, setMatch] = useState(null);
   const [gameKey, setGameKey] = useState(0);
   const [muted, setMuted] = useState(false);
+  const [tutorial, setTutorial] = useState(false);
 
   useEffect(() => {
     if (career) saveCareer(career);
@@ -4026,6 +4405,14 @@ export default function RetroClashTriviaBowl() {
     if (!m) {
       SOUND_ENGINE.unlock();
       SOUND_ENGINE.play('select');
+    }
+  };
+
+  const tutorialSeen = () => {
+    try {
+      return window.localStorage.getItem(TUTORIAL_SEEN_KEY) === '1';
+    } catch (e) {
+      return false;
     }
   };
 
@@ -4056,50 +4443,67 @@ export default function RetroClashTriviaBowl() {
     setScreen('match');
   };
 
-  const showMenu = screen !== 'title' && screen !== 'match' && screen !== 'quickMatch';
+  const inMatch = screen === 'match' || screen === 'quickMatch';
+  const barBtn = 'border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] shadow-[2px_2px_0_#000] hover:bg-[#241f48]';
 
   return (
-    <div className="min-h-screen bg-[#0d0b1e] px-4 py-4 text-white sm:px-6" style={{ ...FONT_STYLE, backgroundImage: 'radial-gradient(#1f1a40 1px, transparent 1px)', backgroundSize: '12px 12px' }}>
-      <div className="mx-auto mb-4 flex max-w-4xl items-center justify-between gap-2">
-        {showMenu ? (
-          <button type="button" onClick={() => setScreen('title')} className="border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] shadow-[2px_2px_0_#000]" style={FONT_STYLE}>
-            ◀ MENU
-          </button>
-        ) : (
-          <div className="text-[9px] text-slate-500">{screen === 'title' ? 'INSERT COIN' : 'RETRO CLASH: TRIVIA BOWL'}</div>
-        )}
+    <div className="flex min-h-[100dvh] flex-col bg-[#0d0b1e] text-white" style={{ ...FONT_STYLE, backgroundImage: 'radial-gradient(#1f1a40 1px, transparent 1px)', backgroundSize: '12px 12px' }}>
+      <div style={GUTTER} className="flex items-center justify-between gap-2 border-b-4 border-black bg-[#0a0818] py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {screen !== 'title' && !inMatch && (
+            <button type="button" onClick={() => setScreen('title')} className={barBtn} style={FONT_STYLE}>
+              ◀ MENU
+            </button>
+          )}
+          <span className="truncate text-[9px] text-[#ffd23f]">{screen === 'title' ? 'INSERT COIN' : 'RETRO CLASH: TRIVIA BOWL'}</span>
+        </div>
         <div className="flex items-center gap-2">
+          {!inMatch && (
+            <button type="button" onClick={() => setTutorial(true)} className={`${barBtn} hidden sm:block`} style={FONT_STYLE}>
+              ? HOW TO PLAY
+            </button>
+          )}
           <SideLinks />
-          <button type="button" onClick={toggleMute} className="border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] shadow-[2px_2px_0_#000]" style={FONT_STYLE} aria-label={muted ? 'Unmute' : 'Mute'}>
-            {muted ? '🔇 MUTED' : '🔊 SOUND'}
+          <button type="button" onClick={toggleMute} className={barBtn} style={FONT_STYLE} aria-label={muted ? 'Unmute' : 'Mute'}>
+            {muted ? '🔇' : '🔊'}
+            <span className="hidden sm:inline">{muted ? ' MUTED' : ' SOUND'}</span>
           </button>
         </div>
       </div>
-      {screen === 'title' && <TitleScreen career={career} onContinue={() => setScreen('hub')} onNew={() => setScreen('newCareer')} onQuick={() => setScreen('quickSetup')} />}
-      {screen === 'newCareer' && (
-        <NewCareerScreen
-          hasSave={!!career}
-          onBack={() => setScreen('title')}
-          onCreate={(club) => {
-            setCareer(newCareer(club));
-            setScreen('hub');
-          }}
-        />
-      )}
-      {screen === 'hub' && career && <CareerHub career={career} setCareer={setCareer} onPlay={playFixture} />}
-      {screen === 'match' && match && <GameScreen key={gameKey} setup={match.setup} career={match.career} />}
-      {screen === 'quickSetup' && (
-        <SetupScreen
-          initial={quickSetup}
-          onStart={(s) => {
-            setQuickSetup(s);
-            setMatch({ setup: s, career: null });
-            setGameKey((k) => k + 1);
-            setScreen('quickMatch');
-          }}
-        />
-      )}
-      {screen === 'quickMatch' && match && <GameScreen key={gameKey} setup={match.setup} onExit={() => setScreen('quickSetup')} onRematch={() => setGameKey((k) => k + 1)} />}
+      <main className="flex flex-1 flex-col">
+        {screen === 'title' ? (
+          <TitleScreen career={career} onContinue={() => setScreen('hub')} onNew={() => setScreen('newCareer')} onQuick={() => setScreen('quickSetup')} onTutorial={() => setTutorial(true)} />
+        ) : (
+          <div style={GUTTER} className="flex flex-1 flex-col py-4">
+            {screen === 'newCareer' && (
+              <NewCareerScreen
+                hasSave={!!career}
+                onBack={() => setScreen('title')}
+                onCreate={(club) => {
+                  setCareer(newCareer(club));
+                  setScreen('hub');
+                  if (!tutorialSeen()) setTutorial(true);
+                }}
+              />
+            )}
+            {screen === 'hub' && career && <CareerHub career={career} setCareer={setCareer} onPlay={playFixture} onHelp={() => setTutorial(true)} />}
+            {screen === 'match' && match && <GameScreen key={gameKey} setup={match.setup} career={match.career} />}
+            {screen === 'quickSetup' && (
+              <SetupScreen
+                initial={quickSetup}
+                onStart={(s) => {
+                  setQuickSetup(s);
+                  setMatch({ setup: s, career: null });
+                  setGameKey((k) => k + 1);
+                  setScreen('quickMatch');
+                }}
+              />
+            )}
+            {screen === 'quickMatch' && match && <GameScreen key={gameKey} setup={match.setup} onExit={() => setScreen('quickSetup')} onRematch={() => setGameKey((k) => k + 1)} />}
+          </div>
+        )}
+      </main>
+      {tutorial && <Tutorial onClose={() => setTutorial(false)} />}
     </div>
   );
 }
