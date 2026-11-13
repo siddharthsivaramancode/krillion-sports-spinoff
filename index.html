@@ -24,9 +24,11 @@
   <body>
     <div id="root"></div>
     <script type="module">
-      const src = await (await fetch('./RetroClashTriviaBowl.jsx')).text();
+      const toUrl = (code) => URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+      const bankUrl = toUrl(await (await fetch('./trivia-bank.js')).text());
+      const src = (await (await fetch('./RetroClashTriviaBowl.jsx')).text()).replace("from './trivia-bank.js'", `from '${bankUrl}'`);
       const { code } = Babel.transform(src, { presets: [['react', { runtime: 'classic' }]], sourceType: 'module', filename: 'RetroClashTriviaBowl.jsx' });
-      const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+      const url = toUrl(code);
       const [{ default: App }, React, { createRoot }] = await Promise.all([import(url), import('react'), import('react-dom/client')]);
       createRoot(document.getElementById('root')).render(React.createElement(App));
     </script>

@@ -22,143 +22,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, useReducer } from 'react';
 
 /* =============================================================================
-   1. TRIVIA_BANK
-   -----------------------------------------------------------------------------
-   Two ways to add prompts (both end up in TRIVIA_BANK with the same shape):
-
-   A) RANKED_PROMPTS (recommended): list EVERY valid answer, ordered from the
-      most common answer people give down to the rarest. Tiers are computed from
-      each answer's position in that list using RARITY_CUTOFFS, so rarity is
-      consistent across the whole bank instead of hand-guessed per answer.
-      Entry format: 'Display Text|alias one|alias two'.
-      `rankedBy` documents the popularity signal used to order the list.
-
-   B) CUSTOM_PROMPTS: hand-tiered prompts in the original explicit shape:
-      { id, category, prompt, answers: [{ text, aliases: [], tier }] }
-
-   Matching already ignores case, accents, punctuation, spaces, a leading
-   "the/a/an", simple plurals and small typos, so aliases are only needed for
-   genuinely different names (nicknames, abbreviations, old names).
+   1. TRIVIA_BANK  ->  lives in ./trivia-bank.js (paste new prompts there)
 ============================================================================= */
+import { TRIVIA_BANK, RARITY_CUTOFFS } from './trivia-bank.js';
 
-// Share of a ranked list (most common first) that falls into T1, T1-T2, T1-T3, T1-T4.
-// Default: top 12% = T1, next 18% = T2, next 30% = T3, next 25% = T4, rarest 15% = T5.
-export const RARITY_CUTOFFS = [0.12, 0.3, 0.6, 0.85];
-
-export const CUSTOM_PROMPTS = [];
-
-export const RANKED_PROMPTS = [
-  // ---------------------------------------------------------------- GEOGRAPHY
-  { id: 'us-states', category: 'GEOGRAPHY', prompt: 'Name a US state', rankedBy: 'population, tourism and pop-culture prominence', ranked: ['California|cali', 'Texas', 'Florida', 'New York', 'Hawaii', 'Alaska', 'Washington', 'Illinois', 'Georgia', 'Ohio', 'Pennsylvania', 'Michigan', 'Arizona', 'Colorado', 'Nevada', 'North Carolina', 'New Jersey', 'Virginia', 'Massachusetts', 'Tennessee', 'Louisiana', 'Oregon', 'Utah', 'Kentucky', 'Alabama', 'Minnesota', 'Indiana', 'Missouri', 'South Carolina', 'Wisconsin', 'Oklahoma', 'Kansas', 'Maryland', 'Connecticut', 'Iowa', 'Mississippi', 'Arkansas', 'Nebraska', 'New Mexico', 'Idaho', 'Montana', 'Maine', 'West Virginia', 'New Hampshire', 'Vermont', 'Rhode Island', 'Delaware', 'Wyoming', 'South Dakota', 'North Dakota'] },
-  { id: 'africa-countries', category: 'GEOGRAPHY', prompt: 'Name a country in Africa', rankedBy: 'population, news coverage and tourism prominence', ranked: ['Egypt', 'South Africa', 'Nigeria', 'Kenya', 'Morocco', 'Ethiopia', 'Ghana', 'Algeria', 'Tanzania', 'Uganda', 'Zimbabwe', 'Somalia', 'Sudan', 'Libya', 'Tunisia', 'Rwanda', 'Senegal', 'Cameroon', 'Madagascar', 'Democratic Republic of the Congo|dr congo|drc|congo|congo kinshasa|zaire', 'Angola', 'Ivory Coast|cote divoire', 'Mozambique', 'Zambia', 'Namibia', 'Botswana', 'Mali', 'Niger', 'Chad', 'South Sudan', 'Liberia', 'Sierra Leone', 'Malawi', 'Burkina Faso', 'Republic of the Congo|congo brazzaville|congo republic', 'Gabon', 'Togo', 'Benin', 'Guinea', 'Mauritania', 'Eritrea', 'Djibouti', 'Gambia', 'Lesotho', 'Eswatini|swaziland', 'Burundi', 'Central African Republic|car', 'Cape Verde|cabo verde', 'Mauritius', 'Seychelles', 'Equatorial Guinea', 'Guinea-Bissau', 'Comoros', 'Sao Tome and Principe|sao tome'] },
-  { id: 'europe-countries', category: 'GEOGRAPHY', prompt: 'Name a country in Europe', rankedBy: 'population, tourism and news prominence', ranked: ['France', 'Germany', 'Italy', 'Spain', 'England', 'United Kingdom|uk|britain|great britain', 'Russia', 'Greece', 'Portugal', 'Ireland|republic of ireland|eire', 'Netherlands|holland', 'Switzerland', 'Sweden', 'Norway', 'Poland', 'Belgium', 'Austria', 'Denmark', 'Finland', 'Scotland', 'Ukraine', 'Iceland', 'Turkey|turkiye', 'Czech Republic|czechia', 'Hungary', 'Croatia', 'Wales', 'Romania', 'Serbia', 'Bulgaria', 'Northern Ireland', 'Luxembourg', 'Monaco', 'Slovakia', 'Slovenia', 'Belarus', 'Lithuania', 'Latvia', 'Estonia', 'Albania', 'Bosnia and Herzegovina|bosnia', 'Montenegro', 'Malta', 'Cyprus', 'North Macedonia|macedonia', 'Moldova', 'Andorra', 'Liechtenstein', 'San Marino', 'Vatican City|vatican|holy see', 'Kosovo'] },
-  { id: 'asia-countries', category: 'GEOGRAPHY', prompt: 'Name a country in Asia', rankedBy: 'population, economy and news prominence', ranked: ['China', 'Japan', 'India', 'South Korea|korea', 'Thailand', 'Vietnam', 'Philippines', 'Indonesia', 'North Korea', 'Pakistan', 'Iran', 'Iraq', 'Israel', 'Saudi Arabia', 'Afghanistan', 'Singapore', 'Malaysia', 'Nepal', 'United Arab Emirates|uae|emirates', 'Taiwan', 'Bangladesh', 'Sri Lanka', 'Mongolia', 'Qatar', 'Syria', 'Cambodia', 'Jordan', 'Lebanon', 'Kuwait', 'Myanmar|burma', 'Kazakhstan', 'Laos', 'Yemen', 'Oman', 'Maldives', 'Bhutan', 'Uzbekistan', 'Bahrain', 'Georgia', 'Armenia', 'Azerbaijan', 'Brunei', 'Kyrgyzstan', 'Tajikistan', 'Turkmenistan', 'Palestine', 'East Timor|timor leste'] },
-  { id: 'americas-countries', category: 'GEOGRAPHY', prompt: 'Name a country in North or South America', rankedBy: 'population, tourism and news prominence', ranked: ['United States|usa|us|america|united states of america', 'Canada', 'Mexico', 'Brazil', 'Argentina', 'Cuba', 'Jamaica', 'Colombia', 'Peru', 'Chile', 'Venezuela', 'Ecuador', 'Bolivia', 'Uruguay', 'Paraguay', 'Dominican Republic', 'Haiti', 'Costa Rica', 'Panama', 'Bahamas', 'Guatemala', 'Honduras', 'El Salvador', 'Nicaragua', 'Belize', 'Trinidad and Tobago|trinidad', 'Barbados', 'Guyana', 'Suriname', 'Grenada', 'Saint Lucia|st lucia', 'Antigua and Barbuda|antigua', 'Dominica', 'Saint Kitts and Nevis|st kitts', 'Saint Vincent and the Grenadines|st vincent'] },
-  { id: 'world-capitals', category: 'GEOGRAPHY', prompt: 'Name a capital city of any country', rankedBy: 'city fame (tourism, population, news mentions)', ranked: ['London', 'Paris', 'Tokyo', 'Washington, D.C.|washington dc|washington|dc', 'Rome', 'Beijing', 'Moscow', 'Madrid', 'Berlin', 'Ottawa', 'Canberra', 'Mexico City', 'Cairo', 'New Delhi|delhi', 'Athens', 'Dublin', 'Amsterdam', 'Seoul', 'Bangkok', 'Lisbon', 'Vienna', 'Brussels', 'Stockholm', 'Oslo', 'Copenhagen', 'Buenos Aires', 'Brasilia', 'Lima', 'Havana', 'Santiago', 'Bogota', 'Nairobi', 'Prague', 'Budapest', 'Warsaw', 'Helsinki', 'Bern', 'Ankara', 'Jerusalem', 'Tehran', 'Baghdad', 'Riyadh', 'Islamabad', 'Kabul', 'Hanoi', 'Manila', 'Jakarta', 'Kuala Lumpur', 'Singapore', 'Wellington', 'Caracas', 'Kyiv|kiev', 'Reykjavik', 'Quito', 'Montevideo', 'Kingston', 'Pretoria', 'Abuja', 'Addis Ababa', 'Bucharest', 'Belgrade', 'Sofia', 'Doha', 'Abu Dhabi', 'Kathmandu', 'Dhaka', 'Taipei', 'Ulaanbaatar', 'Accra', 'Rabat', 'Tunis', 'Algiers', 'Dakar', 'Kampala', 'Kigali', 'Harare', 'Luanda', 'Zagreb', 'Bratislava', 'Ljubljana', 'Vilnius', 'Riga', 'Tallinn', 'Valletta', 'Tbilisi', 'Yerevan', 'Baku', 'Astana', 'Tashkent', 'Thimphu', 'La Paz', 'Asuncion', 'Port-au-Prince', 'Nassau', 'Phnom Penh', 'Vientiane', 'Naypyidaw', 'Bishkek', 'Dushanbe', 'Ashgabat', 'Sucre'] },
-  { id: 'us-state-capitals', category: 'GEOGRAPHY', prompt: 'Name a US state capital', rankedBy: 'city size and national name recognition', ranked: ['Boston', 'Atlanta', 'Denver', 'Phoenix', 'Austin', 'Nashville', 'Honolulu', 'Sacramento', 'Salt Lake City', 'Indianapolis', 'Columbus', 'Oklahoma City', 'Albany', 'Tallahassee', 'Richmond', 'Raleigh', 'Boise', 'Santa Fe', 'Madison', 'Providence', 'Little Rock', 'Baton Rouge', 'Des Moines', 'Springfield', 'Saint Paul|st paul', 'Lincoln', 'Hartford', 'Trenton', 'Harrisburg', 'Annapolis', 'Juneau', 'Montgomery', 'Jackson', 'Charleston', 'Columbia', 'Lansing', 'Carson City', 'Cheyenne', 'Helena', 'Olympia', 'Salem', 'Frankfort', 'Topeka', 'Concord', 'Augusta', 'Dover', 'Bismarck', 'Pierre', 'Montpelier', 'Jefferson City'] },
-  { id: 'us-cities', category: 'GEOGRAPHY', prompt: 'Name a city in the United States', rankedBy: 'population plus tourism / pop-culture fame', ranked: ['New York City|new york|nyc', 'Los Angeles|la', 'Chicago', 'Miami', 'Las Vegas|vegas', 'San Francisco', 'Boston', 'Seattle', 'Houston', 'Dallas', 'Philadelphia|philly', 'Atlanta', 'Denver', 'Phoenix', 'Orlando', 'San Diego', 'Detroit', 'New Orleans', 'Washington, D.C.|washington dc|dc|washington', 'Austin', 'Nashville', 'Portland', 'Minneapolis', 'Baltimore', 'Cleveland', 'Pittsburgh', 'St. Louis|saint louis', 'Kansas City', 'Charlotte', 'Indianapolis', 'Milwaukee', 'Salt Lake City', 'Honolulu', 'San Antonio', 'Tampa', 'Cincinnati', 'Sacramento', 'San Jose', 'Columbus', 'Memphis', 'Buffalo', 'Oklahoma City', 'Albuquerque', 'Tucson', 'Raleigh', 'Omaha', 'Louisville', 'Jacksonville', 'Fort Worth', 'El Paso', 'Anchorage', 'Boise', 'Richmond', 'Birmingham', 'Tulsa', 'Spokane', 'Des Moines', 'Savannah', 'Charleston', 'Fresno', 'Reno', 'Little Rock', 'Madison', 'Providence', 'Hartford', 'Wichita', 'Lexington', 'Knoxville', 'Chattanooga', 'Fargo', 'Bozeman', 'Duluth'] },
-  { id: 'rivers', category: 'GEOGRAPHY', prompt: 'Name a river anywhere in the world', rankedBy: 'length, fame and how often it appears in school curricula', ranked: ['Nile', 'Amazon', 'Mississippi', 'Thames', 'Yangtze|chang jiang', 'Danube', 'Rhine', 'Ganges|ganga', 'Colorado', 'Missouri', 'Hudson', 'Seine', 'Rio Grande', 'Volga', 'Mekong', 'Tigris', 'Euphrates', 'Congo', 'Niger', 'Ohio', 'Zambezi', 'Columbia', 'Yellow River|huang he', 'Jordan', 'Tiber', 'Indus', 'Potomac', 'Yukon', 'St. Lawrence|saint lawrence', 'Loire', 'Elbe', 'Snake', 'Tennessee', 'Murray', 'Orinoco', 'Delaware', 'Arkansas', 'Red River', 'Shannon', 'Po', 'Douro', 'Ob', 'Lena', 'Yenisei', 'Amur', 'Dnieper', 'Mackenzie', 'Brahmaputra', 'Irrawaddy', 'Darling', 'Severn', 'Tagus', 'Vistula', 'Oder', 'Liffey', 'Susquehanna', 'Limpopo', 'Okavango'] },
-  { id: 'mountains', category: 'GEOGRAPHY', prompt: 'Name a famous mountain or volcano', rankedBy: 'name recognition (height records, landmarks, eruptions)', ranked: ['Mount Everest|everest', 'Mount Kilimanjaro|kilimanjaro', 'Mount Fuji|fuji', 'K2', 'Mount Rushmore|rushmore', 'Matterhorn', 'Mont Blanc', 'Mount Olympus|olympus', 'Mount St. Helens|st helens', 'Denali|mount mckinley', 'Mount Vesuvius|vesuvius', 'Mount Rainier|rainier', 'Mount Etna|etna', 'Pikes Peak', 'Mount Whitney|whitney', 'Table Mountain', 'Ben Nevis', 'Mount Sinai|sinai', 'Aconcagua', 'Mount Elbrus|elbrus', 'Kangchenjunga', 'Mount Hood', 'Half Dome', 'Mount Kenya', 'Eiger', 'Mount Shasta|shasta', 'Annapurna', 'Mount Ararat|ararat', 'Mount Cook|aoraki', 'Mauna Kea', 'Mauna Loa', 'Krakatoa', 'Mount Pinatubo|pinatubo', 'Stone Mountain', 'Mount Washington', 'Mount Kosciuszko|kosciuszko', 'Grand Teton', 'Mount Logan', 'Lhotse', 'Makalu', 'Nanga Parbat', 'Cho Oyu', 'Mount Erebus|erebus', 'Vinson Massif|mount vinson', 'Popocatepetl', 'Chimborazo', 'Cotopaxi', 'Mount Tambora|tambora', 'Puncak Jaya', 'Kirkjufell', 'Mount Roraima|roraima', 'Huascaran', 'Dhaulagiri'] },
-
-  // ------------------------------------------------------------------- SPORTS
-  { id: 'nfl-teams', category: 'SPORTS', prompt: 'Name an NFL team', rankedBy: 'fan base size, TV ratings and championships', ranked: ['Cowboys|dallas cowboys|dallas', 'Patriots|new england patriots|new england|pats', 'Packers|green bay packers|green bay', 'Steelers|pittsburgh steelers|pittsburgh', '49ers|niners|forty niners|san francisco 49ers|san francisco', 'Chiefs|kansas city chiefs|kansas city|kc chiefs', 'Eagles|philadelphia eagles|philadelphia|philly', 'Giants|new york giants|ny giants', 'Bears|chicago bears|chicago', 'Broncos|denver broncos|denver', 'Raiders|las vegas raiders|oakland raiders|las vegas|oakland', 'Seahawks|seattle seahawks|seattle', 'Dolphins|miami dolphins|miami', 'Jets|new york jets|ny jets', 'Ravens|baltimore ravens|baltimore', 'Vikings|minnesota vikings|minnesota', 'Saints|new orleans saints|new orleans', 'Bills|buffalo bills|buffalo', 'Rams|los angeles rams|la rams|st louis rams', 'Lions|detroit lions|detroit', 'Browns|cleveland browns|cleveland', 'Buccaneers|bucs|tampa bay buccaneers|tampa bay', 'Falcons|atlanta falcons|atlanta', 'Bengals|cincinnati bengals|cincinnati', 'Chargers|los angeles chargers|la chargers|san diego chargers', 'Colts|indianapolis colts|indianapolis', 'Commanders|washington commanders|redskins|washington football team|washington', 'Panthers|carolina panthers|carolina', 'Titans|tennessee titans|tennessee|oilers', 'Cardinals|arizona cardinals|arizona', 'Texans|houston texans|houston', 'Jaguars|jacksonville jaguars|jacksonville|jags'] },
-  { id: 'nba-teams', category: 'SPORTS', prompt: 'Name an NBA team', rankedBy: 'fan base size, championships and global merch sales', ranked: ['Lakers|los angeles lakers|la lakers', 'Bulls|chicago bulls', 'Celtics|boston celtics', 'Warriors|golden state warriors|golden state', 'Knicks|new york knicks', 'Heat|miami heat', 'Cavaliers|cavs|cleveland cavaliers', 'Spurs|san antonio spurs', 'Nets|brooklyn nets', 'Rockets|houston rockets', 'Mavericks|mavs|dallas mavericks', '76ers|sixers|philadelphia 76ers', 'Clippers|la clippers', 'Suns|phoenix suns', 'Thunder|okc thunder|oklahoma city thunder', 'Raptors|toronto raptors', 'Bucks|milwaukee bucks', 'Nuggets|denver nuggets', 'Pistons|detroit pistons', 'Magic|orlando magic', 'Trail Blazers|blazers|portland trail blazers', 'Jazz|utah jazz', 'Timberwolves|minnesota timberwolves', 'Hawks|atlanta hawks', 'Kings|sacramento kings', 'Pacers|indiana pacers', 'Grizzlies|memphis grizzlies', 'Pelicans|new orleans pelicans', 'Hornets|charlotte hornets', 'Wizards|washington wizards'] },
-  { id: 'mlb-teams', category: 'SPORTS', prompt: 'Name an MLB baseball team', rankedBy: 'fan base size, attendance and World Series history', ranked: ['Yankees|new york yankees|ny yankees', 'Red Sox|boston red sox', 'Dodgers|los angeles dodgers|la dodgers', 'Cubs|chicago cubs', 'Giants|san francisco giants|sf giants', 'Mets|new york mets', 'Cardinals|st louis cardinals', 'Braves|atlanta braves', 'Astros|houston astros', 'White Sox|chicago white sox', 'Phillies|philadelphia phillies', 'Tigers|detroit tigers', 'Angels|los angeles angels|anaheim angels', 'Mariners|seattle mariners', 'Blue Jays|toronto blue jays|jays', 'Rangers|texas rangers', 'Padres|san diego padres', 'Orioles|baltimore orioles', 'Pirates|pittsburgh pirates', 'Reds|cincinnati reds', 'Twins|minnesota twins', 'Brewers|milwaukee brewers', 'Royals|kansas city royals', 'Guardians|cleveland guardians|indians|cleveland indians', 'Marlins|miami marlins', 'Rockies|colorado rockies', 'Diamondbacks|dbacks|arizona diamondbacks', 'Rays|tampa bay rays', 'Athletics|oakland athletics|as', 'Nationals|nats|washington nationals'] },
-  { id: 'premier-league-clubs', category: 'SPORTS', prompt: 'Name a club that has played in the English Premier League', rankedBy: 'global fan base, titles and seasons spent in the top flight', ranked: ['Manchester United|man united|man utd|man u', 'Liverpool', 'Arsenal', 'Chelsea', 'Manchester City|man city', 'Tottenham|tottenham hotspur|spurs', 'Everton', 'Newcastle|newcastle united', 'West Ham|west ham united', 'Aston Villa|villa', 'Leicester City|leicester', 'Leeds United|leeds', 'Southampton', 'Wolves|wolverhampton|wolverhampton wanderers', 'Brighton|brighton and hove albion', 'Crystal Palace|palace', 'Fulham', 'Nottingham Forest|forest', 'Sunderland', 'Blackburn Rovers|blackburn', 'Middlesbrough|boro', 'Bournemouth|afc bournemouth', 'Burnley', 'Brentford', 'Stoke City|stoke', 'Norwich City|norwich', 'Watford', 'West Brom|west bromwich albion', 'Bolton Wanderers|bolton', 'Wigan Athletic|wigan', 'Swansea City|swansea', 'Ipswich Town|ipswich', 'Charlton Athletic|charlton', 'Portsmouth', 'Sheffield United', 'Hull City|hull', 'Birmingham City|birmingham', 'Queens Park Rangers|qpr', 'Cardiff City|cardiff', 'Derby County|derby', 'Reading', 'Coventry City|coventry', 'Wimbledon', 'Blackpool', 'Huddersfield Town|huddersfield', 'Luton Town|luton', 'Sheffield Wednesday', 'Oldham Athletic|oldham', 'Barnsley', 'Bradford City|bradford', 'Swindon Town|swindon'] },
-  { id: 'euro-clubs', category: 'SPORTS', prompt: 'Name a European soccer club that is NOT English', rankedBy: 'global fan base, European trophies and social following', ranked: ['Real Madrid', 'Barcelona|barca', 'Bayern Munich|bayern', 'Juventus|juve', 'Paris Saint-Germain|psg|paris saint germain', 'AC Milan|milan', 'Inter Milan|inter', 'Borussia Dortmund|dortmund|bvb', 'Ajax', 'Atletico Madrid|atletico', 'Benfica', 'Porto', 'Celtic', 'Rangers', 'Roma|as roma', 'Napoli', 'Lazio', 'Marseille|olympique marseille', 'Lyon|olympique lyonnais', 'Sevilla', 'Valencia', 'Bayer Leverkusen|leverkusen', 'RB Leipzig|leipzig', 'Schalke', 'PSV Eindhoven|psv', 'Feyenoord', 'Galatasaray', 'Fenerbahce', 'Monaco|as monaco', 'Sporting CP|sporting lisbon|sporting', 'Villarreal', 'Atalanta', 'Fiorentina', 'Olympiacos', 'Besiktas', 'Shakhtar Donetsk|shakhtar', 'Dynamo Kyiv|dynamo kiev', 'Red Star Belgrade|crvena zvezda', 'Anderlecht', 'Club Brugge|brugge', 'Basel|fc basel', 'Real Sociedad', 'Athletic Bilbao|athletic club', 'Eintracht Frankfurt|frankfurt', 'Wolfsburg', 'Lille', 'Nice|ogc nice', 'Red Bull Salzburg|salzburg', 'FC Copenhagen|copenhagen', 'Zenit Saint Petersburg|zenit'] },
-  { id: 'tennis-players', category: 'SPORTS', prompt: 'Name a famous tennis player (past or present)', rankedBy: 'Grand Slam titles plus mainstream media fame', ranked: ['Serena Williams|serena', 'Roger Federer|federer', 'Rafael Nadal|nadal|rafa|rafa nadal', 'Novak Djokovic|djokovic|novak', 'Venus Williams|venus', 'Andre Agassi|agassi', 'Pete Sampras|sampras', 'John McEnroe|mcenroe', 'Maria Sharapova|sharapova', 'Andy Murray|murray', 'Carlos Alcaraz|alcaraz', 'Steffi Graf|graf', 'Billie Jean King', 'Bjorn Borg|borg', 'Martina Navratilova|navratilova', 'Jannik Sinner|sinner', 'Chris Evert|evert', 'Naomi Osaka|osaka', 'Arthur Ashe|ashe', 'Coco Gauff|gauff', 'Jimmy Connors|connors', 'Boris Becker|becker', 'Rod Laver|laver', 'Monica Seles|seles', 'Martina Hingis|hingis', 'Andy Roddick|roddick', 'Iga Swiatek|swiatek', 'Stan Wawrinka|wawrinka', 'Kim Clijsters|clijsters', 'Justine Henin|henin', 'Ivan Lendl|lendl', 'Lleyton Hewitt|hewitt', 'Aryna Sabalenka|sabalenka', 'Daniil Medvedev|medvedev', 'Stefan Edberg|edberg', 'Emma Raducanu|raducanu', 'Caroline Wozniacki|wozniacki', 'Juan Martin del Potro|del potro', 'Nick Kyrgios|kyrgios', 'Alexander Zverev|zverev', 'Li Na', 'Margaret Court', 'Ken Rosewall|rosewall', 'Gabriela Sabatini|sabatini', 'Goran Ivanisevic|ivanisevic', 'Marat Safin|safin', 'Petra Kvitova|kvitova', 'Ashleigh Barty|ash barty|barty'] },
-  { id: 'nba-players', category: 'SPORTS', prompt: 'Name an NBA player (past or present)', rankedBy: 'career accolades plus mainstream celebrity', ranked: ['Michael Jordan|jordan|mj', 'LeBron James|lebron', 'Kobe Bryant|kobe', "Shaquille O'Neal|shaq", 'Stephen Curry|steph curry|curry', 'Magic Johnson|magic', 'Larry Bird', 'Kevin Durant|durant|kd', 'Kareem Abdul-Jabbar|kareem', 'Wilt Chamberlain|chamberlain|wilt', 'Tim Duncan|duncan', 'Dennis Rodman|rodman', 'Allen Iverson|iverson', 'Dwyane Wade|dwayne wade', 'Giannis Antetokounmpo|giannis', 'Dirk Nowitzki|dirk|nowitzki', 'Scottie Pippen|pippen', 'Kawhi Leonard|kawhi', 'Hakeem Olajuwon|hakeem|olajuwon', 'Charles Barkley|barkley', 'Bill Russell', 'Nikola Jokic|jokic', 'Luka Doncic|luka|doncic', 'James Harden|harden', 'Russell Westbrook|westbrook', 'Kevin Garnett|garnett', 'Kyrie Irving|kyrie', 'Steve Nash|nash', 'Yao Ming', 'Chris Paul|cp3', 'Carmelo Anthony|carmelo|melo', 'Paul Pierce', 'Patrick Ewing|ewing', 'Vince Carter', 'Ray Allen', 'Tracy McGrady|mcgrady|tmac', 'Klay Thompson|klay', 'Anthony Davis', 'Jayson Tatum|tatum', 'Joel Embiid|embiid', 'Damian Lillard|lillard', 'Victor Wembanyama|wembanyama|wemby', 'John Stockton|stockton', 'Karl Malone', 'Reggie Miller', 'Isiah Thomas', 'Jerry West', 'Julius Erving|dr j', 'Oscar Robertson', 'Pete Maravich|pistol pete', 'David Robinson', 'Ja Morant|morant', 'Jimmy Butler', 'Moses Malone', 'Bob Cousy|cousy', 'Elgin Baylor|baylor'] },
-  { id: 'soccer-players', category: 'SPORTS', prompt: 'Name a soccer player (past or present)', rankedBy: 'Ballon d’Or record, transfer fame and social following', ranked: ['Lionel Messi|messi|leo messi', 'Cristiano Ronaldo|cristiano|cr7|ronaldo', 'Pele', 'Diego Maradona|maradona', 'Neymar', 'Kylian Mbappe|mbappe', 'David Beckham|beckham', 'Zinedine Zidane|zidane', 'Ronaldinho', 'Erling Haaland|haaland', 'Mohamed Salah|salah', 'Wayne Rooney|rooney', 'Thierry Henry|henry', 'Zlatan Ibrahimovic|zlatan|ibrahimovic', 'Ronaldo Nazario|r9|brazilian ronaldo', 'Kaka', 'Luka Modric|modric', 'Robert Lewandowski|lewandowski', 'Harry Kane|kane', 'Johan Cruyff|cruyff', 'Franz Beckenbauer|beckenbauer', 'Andres Iniesta|iniesta', 'Xavi', 'Gianluigi Buffon|buffon', 'Paolo Maldini|maldini', 'Karim Benzema|benzema', 'Kevin De Bruyne|de bruyne|kdb', 'Luis Suarez|suarez', 'Didier Drogba|drogba', 'Steven Gerrard|gerrard', 'Frank Lampard|lampard', 'Gareth Bale|bale', 'Eden Hazard|hazard', 'Sergio Ramos|ramos', 'Iker Casillas|casillas', 'Andrea Pirlo|pirlo', 'Francesco Totti|totti', 'Manuel Neuer|neuer', 'Vinicius Junior|vinicius|vini jr', 'Jude Bellingham|bellingham', 'Son Heung-min|son', 'Eusebio', 'Ferenc Puskas|puskas', 'Michel Platini|platini', 'Marco van Basten|van basten', 'Luis Figo|figo', 'Eric Cantona|cantona', 'Alan Shearer|shearer', 'Paul Pogba|pogba', "N'Golo Kante|kante", 'Thomas Muller|muller|mueller', 'Toni Kroos|kroos', 'Rivaldo', 'Romario', 'Roberto Baggio|baggio', 'Alessandro Del Piero|del piero', 'George Weah|weah', "Samuel Eto'o|etoo", 'Lev Yashin|yashin', 'Lamine Yamal|yamal'] },
-  { id: 'nfl-quarterbacks', category: 'SPORTS', prompt: 'Name an NFL quarterback (past or present)', rankedBy: 'Super Bowl wins, records and media fame', ranked: ['Tom Brady|brady', 'Peyton Manning|peyton', 'Patrick Mahomes|mahomes', 'Aaron Rodgers|rodgers', 'Joe Montana|montana', 'Brett Favre|favre', 'Dan Marino|marino', 'John Elway|elway', 'Drew Brees|brees', 'Eli Manning|eli', 'Josh Allen', 'Lamar Jackson|lamar', 'Joe Burrow|burrow', 'Russell Wilson', 'Ben Roethlisberger|roethlisberger|big ben', 'Troy Aikman|aikman', 'Terry Bradshaw|bradshaw', 'Steve Young', 'Joe Namath|namath|broadway joe', 'Michael Vick|vick', 'Cam Newton', 'Jalen Hurts|hurts', 'Dak Prescott|dak|prescott', 'Matt Ryan', 'Philip Rivers|rivers', 'Kurt Warner', 'Johnny Unitas|unitas', 'Tony Romo|romo', 'Joe Flacco|flacco', 'Jim Kelly', 'Warren Moon', 'Fran Tarkenton|tarkenton', 'Bart Starr', 'Roger Staubach|staubach', 'Matthew Stafford|stafford', 'Kirk Cousins|cousins', 'Justin Herbert|herbert', 'C.J. Stroud|stroud', 'Tua Tagovailoa|tua', 'Baker Mayfield|mayfield', 'Jared Goff|goff', 'Trevor Lawrence', 'Tim Tebow|tebow', 'Doug Flutie|flutie', 'Randall Cunningham', 'Steve McNair|mcnair', 'Donovan McNabb|mcnabb', 'Ken Stabler|kenny stabler|stabler', 'Dan Fouts|fouts', 'Sid Luckman|luckman'] },
-  { id: 'golfers', category: 'SPORTS', prompt: 'Name a professional golfer', rankedBy: 'major titles plus mainstream fame', ranked: ['Tiger Woods|tiger', 'Jack Nicklaus|nicklaus', 'Arnold Palmer|palmer', 'Phil Mickelson|mickelson', 'Rory McIlroy|mcilroy|rory', 'Scottie Scheffler|scheffler', 'Jordan Spieth|spieth', 'Gary Player', 'Bubba Watson|bubba', 'Dustin Johnson', 'Brooks Koepka|koepka', 'Bryson DeChambeau|dechambeau|bryson', 'Seve Ballesteros|seve|ballesteros', 'Ben Hogan|hogan', 'Sergio Garcia', 'Annika Sorenstam|annika|sorenstam', 'Ernie Els', 'Vijay Singh', 'Jon Rahm|rahm', 'Justin Thomas', 'Rickie Fowler|fowler', 'Greg Norman', 'Lee Trevino|trevino', 'Nelly Korda|korda', 'Tom Watson', 'Bobby Jones', 'Sam Snead|snead', 'Nick Faldo|faldo', 'Xander Schauffele|schauffele', 'Fred Couples|couples', 'Collin Morikawa|morikawa', 'Payne Stewart', 'Lorena Ochoa|ochoa', 'Lydia Ko', 'Hideki Matsuyama|matsuyama', 'Padraig Harrington|harrington'] },
-  { id: 'olympic-summer', category: 'SPORTS', prompt: 'Name a Summer Olympic sport or event', rankedBy: 'US/UK TV viewership of Olympic events', ranked: ['Swimming', 'Track and Field|athletics|track|running', 'Gymnastics', 'Basketball', 'Soccer|football', 'Tennis', 'Boxing', 'Volleyball', 'Diving', 'Cycling', 'Wrestling', 'Beach Volleyball', 'Rowing', 'Fencing', 'Weightlifting', 'Archery', 'Judo', 'Taekwondo', 'Golf', 'Equestrian|horse riding|show jumping|dressage', 'Sailing', 'Water Polo', 'Table Tennis|ping pong', 'Badminton', 'Shooting', 'Field Hockey|hockey', 'Handball', 'Rugby Sevens|rugby', 'Triathlon', 'Skateboarding', 'Surfing', 'Sport Climbing|climbing|rock climbing', 'Canoeing|canoe|kayaking|canoe slalom', 'Artistic Swimming|synchronized swimming', 'Trampoline', 'BMX', 'Marathon', 'Breaking|breakdancing', 'Decathlon', 'Heptathlon', 'Rhythmic Gymnastics', 'Modern Pentathlon|pentathlon'] },
-  { id: 'winter-sports', category: 'SPORTS', prompt: 'Name a Winter Olympic sport or event', rankedBy: 'US/Canada TV viewership of Winter Olympic events', ranked: ['Skiing', 'Ice Hockey|hockey', 'Figure Skating', 'Snowboarding', 'Bobsled|bobsleigh', 'Curling', 'Speed Skating', 'Luge', 'Ski Jumping', 'Alpine Skiing|downhill skiing', 'Biathlon', 'Skeleton', 'Cross-Country Skiing', 'Freestyle Skiing', 'Short Track', 'Halfpipe', 'Moguls', 'Slalom', 'Downhill', 'Giant Slalom', 'Ice Dancing', 'Super-G', 'Aerials', 'Nordic Combined', 'Big Air', 'Slopestyle', 'Ski Cross', 'Snowboard Cross', 'Team Pursuit', 'Mass Start', 'Parallel Giant Slalom', 'Ski Mountaineering'] },
-  { id: 'ball-sports', category: 'SPORTS', prompt: 'Name a sport played with a ball', rankedBy: 'worldwide participation and TV audience', ranked: ['Soccer|football', 'Basketball', 'American Football', 'Baseball', 'Tennis', 'Golf', 'Volleyball', 'Rugby', 'Cricket', 'Bowling', 'Table Tennis|ping pong', 'Softball', 'Dodgeball', 'Handball', 'Water Polo', 'Lacrosse', 'Field Hockey', 'Squash', 'Pickleball', 'Racquetball', 'Kickball', 'Billiards|pool|snooker', 'Polo', 'Netball', 'Beach Volleyball', 'Futsal', 'Croquet', 'Bocce', 'Padel', 'Australian Rules Football|aussie rules|afl', 'Gaelic Football', 'Hurling', 'Wiffle Ball', 'Four Square', 'Tetherball', 'Petanque', 'Sepak Takraw', 'Jai Alai', 'Korfball', 'Goalball'] },
-
-  // --------------------------------------------------------------------- FOOD
-  { id: 'fruits', category: 'FOOD', prompt: 'Name a fruit', rankedBy: 'US grocery sales volume and everyday familiarity', ranked: ['Apple', 'Banana', 'Orange', 'Strawberry', 'Grape', 'Watermelon', 'Mango', 'Pineapple', 'Peach', 'Cherry', 'Pear', 'Blueberry', 'Lemon', 'Kiwi', 'Raspberry', 'Plum', 'Lime', 'Cantaloupe', 'Coconut', 'Grapefruit', 'Pomegranate', 'Papaya', 'Apricot', 'Avocado', 'Blackberry', 'Honeydew', 'Tangerine', 'Clementine', 'Nectarine', 'Cranberry', 'Fig', 'Passion Fruit', 'Dragon Fruit|pitaya', 'Guava', 'Lychee|litchi', 'Date', 'Tomato', 'Mandarin', 'Persimmon', 'Starfruit|carambola', 'Jackfruit', 'Durian', 'Gooseberry', 'Kumquat', 'Quince', 'Rambutan', 'Elderberry', 'Mulberry', 'Boysenberry', 'Plantain', 'Olive', 'Acai', 'Yuzu', 'Mangosteen', 'Loquat', 'Huckleberry', 'Tamarind', 'Breadfruit', 'Ugli Fruit', 'Cloudberry', 'Salak|snake fruit', 'Feijoa'] },
-  { id: 'vegetables', category: 'FOOD', prompt: 'Name a vegetable', rankedBy: 'US grocery sales volume and everyday familiarity', ranked: ['Carrot', 'Broccoli', 'Potato', 'Lettuce', 'Tomato', 'Onion', 'Corn', 'Cucumber', 'Spinach', 'Celery', 'Bell Pepper|pepper', 'Peas|pea', 'Green Beans|string beans', 'Cabbage', 'Cauliflower', 'Mushroom', 'Zucchini|courgette', 'Garlic', 'Sweet Potato|yam', 'Asparagus', 'Eggplant|aubergine', 'Kale', 'Brussels Sprouts|brussel sprouts', 'Pumpkin', 'Beet|beetroot', 'Radish', 'Squash', 'Artichoke', 'Avocado', 'Okra', 'Leek', 'Turnip', 'Bok Choy|pak choi', 'Arugula|rocket', 'Parsnip', 'Jalapeno', 'Chickpeas|garbanzo', 'Edamame', 'Shallot', 'Scallion|green onion|spring onion', 'Collard Greens|collards', 'Swiss Chard|chard', 'Rutabaga|swede', 'Fennel', 'Watercress', 'Kohlrabi', 'Daikon', 'Jicama', 'Endive', 'Radicchio', 'Taro', 'Cassava|yuca', 'Lotus Root', 'Bamboo Shoots', 'Fiddlehead', 'Salsify', 'Romanesco'] },
-  { id: 'pizza-toppings', category: 'FOOD', prompt: 'Name a pizza topping', rankedBy: 'US pizza-chain topping order data and polls', ranked: ['Pepperoni', 'Cheese|mozzarella', 'Mushrooms', 'Sausage', 'Pineapple', 'Onions', 'Olives|black olives', 'Bacon', 'Ham', 'Green Peppers|peppers|bell peppers', 'Chicken', 'Jalapenos', 'Spinach', 'Tomatoes', 'Ground Beef|beef', 'Anchovies', 'Garlic', 'Basil', 'Salami', 'Extra Cheese', 'BBQ Chicken', 'Meatballs', 'Artichoke', 'Feta', 'Prosciutto', 'Sun-Dried Tomatoes', 'Red Onion', 'Arugula', 'Ricotta', 'Chorizo', 'Banana Peppers', 'Pesto', 'Parmesan', 'Buffalo Chicken', 'Shrimp', 'Goat Cheese', 'Egg', 'Truffle', 'Capers', 'Corn', 'Eggplant', 'Potato', 'Figs', 'Clams'] },
-  { id: 'cheeses', category: 'FOOD', prompt: 'Name a type of cheese', rankedBy: 'US cheese consumption by variety', ranked: ['Cheddar', 'Mozzarella', 'Swiss', 'Parmesan|parmigiano reggiano', 'American', 'Brie', 'Feta', 'Gouda', 'Provolone', 'Pepper Jack', 'Blue Cheese|blue', 'Colby Jack|colby', 'Monterey Jack', 'Cream Cheese', 'Ricotta', 'Camembert', 'Goat Cheese|chevre', 'Muenster', 'Havarti', 'Gruyere', 'Cottage Cheese', 'Romano|pecorino romano', 'Halloumi', 'Mascarpone', 'Manchego', 'Gorgonzola', 'Roquefort', 'Emmental', 'Stilton', 'Paneer', 'Burrata', 'Asiago', 'Fontina', 'Edam', 'Queso Fresco', 'Limburger', 'Jarlsberg', 'Taleggio', 'Raclette', 'Comte', 'Wensleydale', 'Red Leicester', 'Oaxaca', 'Cotija', 'Port Salut', 'Boursin'] },
-  { id: 'fast-food', category: 'FOOD', prompt: 'Name a fast food chain', rankedBy: 'US system-wide sales and store count', ranked: ["McDonald's|mcdonalds|mcd", 'Burger King', "Wendy's", 'Taco Bell', 'KFC|kentucky fried chicken', 'Subway', 'Chick-fil-A', 'Pizza Hut', "Domino's", 'Starbucks', "Dunkin'|dunkin donuts", 'In-N-Out', 'Chipotle', 'Popeyes', 'Five Guys', "Arby's", 'Sonic', 'Dairy Queen|dq', 'Jack in the Box', "Papa John's", 'Panda Express', 'Shake Shack', 'Whataburger', "Carl's Jr.", "Hardee's", 'Little Caesars', 'White Castle', 'Panera Bread|panera', 'Wingstop', "Culver's", "Jimmy John's", "Raising Cane's|canes", 'Del Taco', "Long John Silver's", 'Quiznos', 'Checkers', 'Krispy Kreme', 'Tim Hortons', "Jersey Mike's", 'Firehouse Subs', 'Bojangles', "Church's Chicken|churchs", 'El Pollo Loco', "Zaxby's", "Steak 'n Shake", 'Wienerschnitzel', 'A&W', "Freddy's", 'Qdoba', "Moe's", 'Smashburger', 'Jollibee'] },
-  { id: 'candy', category: 'FOOD', prompt: 'Name a candy or chocolate bar', rankedBy: 'US candy sales rankings', ranked: ['Snickers', "M&M's|m and ms|mms", "Reese's|reeses peanut butter cups", 'Kit Kat', "Hershey's|hershey bar", 'Skittles', 'Twix', 'Starburst', 'Milky Way', 'Butterfinger', 'Sour Patch Kids', 'Jolly Rancher', 'Nerds', 'Twizzlers', 'Gummy Bears', 'Tootsie Roll', 'Swedish Fish', 'Almond Joy', '3 Musketeers|three musketeers', 'Lollipop', 'Candy Corn', "Hershey's Kisses|kisses", 'Laffy Taffy', 'Airheads', 'Mounds', 'Baby Ruth', 'Life Savers', 'Junior Mints', 'Whoppers', 'Milk Duds', 'Payday', 'Warheads', 'Smarties', 'Ferrero Rocher', 'Toblerone', 'Peeps', 'Jelly Beans', 'Cadbury Creme Egg|creme egg', 'Haribo', 'Pop Rocks', 'Mike and Ike', 'Hot Tamales', 'Heath', 'Rolo', 'Lindt', "Werther's", 'Dots', 'Good & Plenty', 'Charleston Chew', 'Bit-O-Honey', 'Zagnut', 'Necco Wafers', 'Chunky', 'Whatchamacallit', 'Mr. Goodbar', 'Cow Tales'] },
-  { id: 'spices', category: 'FOOD', prompt: 'Name a spice or herb', rankedBy: 'US spice-aisle sales and recipe frequency', ranked: ['Salt', 'Black Pepper|pepper', 'Garlic', 'Cinnamon', 'Oregano', 'Basil', 'Paprika', 'Cumin', 'Ginger', 'Chili Powder', 'Rosemary', 'Thyme', 'Parsley', 'Nutmeg', 'Turmeric', 'Cilantro|coriander', 'Bay Leaf', 'Mint', 'Dill', 'Cayenne', 'Onion Powder', 'Curry Powder|curry', 'Sage', 'Vanilla', 'Cloves', 'Garlic Powder', 'Red Pepper Flakes|chili flakes', 'Allspice', 'Cardamom', 'Chives', 'Saffron', 'Mustard Seed|mustard', 'Fennel', 'Tarragon', 'Star Anise|anise', 'Marjoram', 'Sesame', 'Lemongrass', 'Celery Salt', 'Mace', 'Fenugreek', 'Sumac', "Za'atar", 'Garam Masala', 'Caraway', 'Juniper', 'Lavender', 'Chervil', 'Asafoetida', 'Galangal', 'Annatto', 'Savory'] },
-  { id: 'ice-cream', category: 'FOOD', prompt: 'Name an ice cream flavor', rankedBy: 'US flavor sales and popularity polls', ranked: ['Chocolate', 'Vanilla', 'Strawberry', 'Cookies and Cream|cookies n cream', 'Mint Chocolate Chip|mint chip|mint', 'Cookie Dough', 'Rocky Road', 'Butter Pecan', 'Neapolitan', 'Coffee', 'Pistachio', 'Chocolate Chip', 'Rainbow Sherbet|sherbet', 'Salted Caramel|caramel', 'Birthday Cake|cake batter', 'Moose Tracks', 'Cherry Garcia|cherry', 'Peanut Butter', 'Coconut', 'Mango', 'Rum Raisin', 'Black Raspberry', 'Banana', 'Lemon', 'French Vanilla', 'Dulce de Leche', 'Green Tea|matcha', 'Spumoni', 'Tutti Frutti', 'Peach', 'Pralines and Cream', 'Bubblegum', 'Cotton Candy', 'Ube', 'Maple Walnut', 'Toffee', 'Cinnamon', 'Black Sesame', 'Stracciatella', 'Red Bean', 'Honey Lavender|lavender'] },
-  { id: 'pasta', category: 'FOOD', prompt: 'Name a type of pasta', rankedBy: 'US pasta shape sales and menu frequency', ranked: ['Spaghetti', 'Penne', 'Macaroni', 'Fettuccine', 'Lasagna', 'Ravioli', 'Linguine', 'Rigatoni', 'Farfalle|bowtie|bow tie', 'Rotini', 'Tortellini', 'Ziti', 'Angel Hair|capellini', 'Gnocchi', 'Orzo', 'Fusilli', 'Shells|conchiglie', 'Manicotti', 'Cannelloni', 'Orecchiette', 'Pappardelle', 'Tagliatelle', 'Bucatini', 'Ditalini', 'Cavatappi', 'Vermicelli', 'Gemelli', 'Rotelle|wagon wheels', 'Campanelle', 'Radiatori', 'Paccheri', 'Cavatelli', 'Stelline', 'Acini di Pepe', 'Trofie', 'Strozzapreti', 'Mafaldine', 'Casarecce', 'Anelli', 'Garganelli', 'Lumache'] },
-  { id: 'breads', category: 'FOOD', prompt: 'Name a type of bread', rankedBy: 'US bakery sales and menu frequency', ranked: ['White Bread', 'Whole Wheat|wheat', 'Sourdough', 'Rye', 'Bagel', 'Croissant', 'Baguette', 'Pita', 'Tortilla', 'Brioche', 'Ciabatta', 'Naan', 'Focaccia', 'Cornbread', 'Biscuit', 'English Muffin', 'Pretzel', 'Multigrain', 'Pumpernickel', 'Challah', 'Banana Bread', 'Garlic Bread', 'Dinner Roll|roll', 'Hawaiian Roll', 'Flatbread', 'Hot Dog Bun|bun', 'Soda Bread', 'Matzo', 'Lavash', 'Chapati|roti', 'Bao', 'Injera', 'Arepa', 'Crumpet', 'Paratha', 'Fougasse', 'Stollen', 'Pandesal', 'Pan Dulce', 'Lefse', 'Damper'] },
-
-  // ------------------------------------------------------------------ ANIMALS
-  { id: 'dog-breeds', category: 'ANIMALS', prompt: 'Name a breed of dog', rankedBy: 'American Kennel Club registration rankings', ranked: ['Labrador Retriever|labrador|lab', 'Golden Retriever|golden', 'German Shepherd|alsatian', 'Poodle', 'Bulldog|english bulldog', 'Beagle', 'Chihuahua', 'Husky|siberian husky', 'Pug', 'Dachshund|wiener dog|sausage dog', 'Rottweiler', 'Pit Bull|pitbull|american pit bull terrier', 'Boxer', 'Shih Tzu', 'Yorkshire Terrier|yorkie', 'French Bulldog|frenchie', 'Great Dane', 'Corgi|welsh corgi', 'Border Collie', 'Doberman|doberman pinscher', 'Pomeranian', 'Maltese', 'Dalmatian', 'Australian Shepherd|aussie', 'Cocker Spaniel', 'Bichon Frise', 'Saint Bernard|st bernard', 'Bernese Mountain Dog|bernese', 'Shiba Inu|shiba', 'Collie|rough collie', 'Greyhound', 'Cavalier King Charles Spaniel|cavalier', 'Boston Terrier', 'Schnauzer', 'Bloodhound', 'Mastiff', 'Jack Russell Terrier|jack russell', 'Newfoundland', 'Akita', 'Basset Hound', 'Samoyed', 'Great Pyrenees', 'Chow Chow', 'Weimaraner', 'Vizsla', 'Bull Terrier', 'Whippet', 'Pekingese', 'Papillon', 'Shar Pei', 'Afghan Hound', 'Irish Setter', 'Labradoodle', 'Goldendoodle', 'Cane Corso', 'Alaskan Malamute|malamute', 'Havanese', 'Lhasa Apso', 'Scottish Terrier|scottie', 'West Highland Terrier|westie', 'Basenji', 'Rhodesian Ridgeback', 'Belgian Malinois|malinois', 'Bullmastiff', 'German Shorthaired Pointer|pointer', 'Borzoi', 'Keeshond', 'Xoloitzcuintli|xolo', 'Komondor', 'Puli', 'Bedlington Terrier', 'Otterhound', 'Azawakh', 'Lagotto Romagnolo'] },
-  { id: 'mammals', category: 'ANIMALS', prompt: 'Name a mammal', rankedBy: 'how often the animal appears in children’s books, zoos and everyday speech', ranked: ['Dog', 'Cat', 'Lion', 'Elephant', 'Tiger', 'Horse', 'Cow', 'Bear', 'Monkey', 'Giraffe', 'Whale', 'Dolphin', 'Pig', 'Human', 'Wolf', 'Zebra', 'Rabbit|bunny', 'Mouse', 'Gorilla', 'Kangaroo', 'Deer', 'Fox', 'Bat', 'Sheep', 'Goat', 'Rat', 'Squirrel', 'Cheetah', 'Panda', 'Koala', 'Hippopotamus|hippo', 'Rhinoceros|rhino', 'Leopard', 'Chimpanzee|chimp', 'Camel', 'Polar Bear', 'Otter', 'Raccoon', 'Hamster', 'Beaver', 'Moose', 'Seal', 'Skunk', 'Donkey', 'Llama', 'Sloth', 'Hedgehog', 'Bison|buffalo', 'Orangutan', 'Jaguar', 'Porcupine', 'Walrus', 'Opossum|possum', 'Armadillo', 'Hyena', 'Lemur', 'Badger', 'Meerkat', 'Platypus', 'Mole', 'Gerbil', 'Guinea Pig', 'Ferret', 'Alpaca', 'Anteater', 'Weasel', 'Lynx', 'Puma|cougar|mountain lion', 'Antelope', 'Elk', 'Yak', 'Manatee', 'Wombat', 'Chinchilla', 'Mongoose', 'Tapir', 'Okapi', 'Narwhal', 'Aardvark', 'Pangolin', 'Wolverine', 'Capybara', 'Gazelle', 'Warthog', 'Wildebeest|gnu', 'Ocelot', 'Caracal', 'Dugong', 'Echidna', 'Tasmanian Devil', 'Marmot', 'Quokka', 'Numbat', 'Saiga', 'Fossa', 'Aye-aye', 'Binturong'] },
-  { id: 'birds', category: 'ANIMALS', prompt: 'Name a bird', rankedBy: 'how often the bird appears in children’s books, zoos and everyday speech', ranked: ['Eagle', 'Parrot', 'Owl', 'Robin', 'Pigeon', 'Penguin', 'Crow', 'Chicken', 'Flamingo', 'Hawk', 'Duck', 'Blue Jay', 'Cardinal', 'Seagull|gull', 'Ostrich', 'Swan', 'Hummingbird', 'Peacock|peafowl', 'Turkey', 'Sparrow', 'Falcon', 'Pelican', 'Woodpecker', 'Goose', 'Raven', 'Toucan', 'Vulture', 'Dove', 'Emu', 'Canary', 'Stork', 'Heron', 'Bald Eagle', 'Kiwi', 'Parakeet|budgie', 'Magpie', 'Finch', 'Cockatoo', 'Crane', 'Starling', 'Macaw', 'Albatross', 'Puffin', 'Kingfisher', 'Condor', 'Oriole', 'Mockingbird', 'Quail', 'Pheasant', 'Roadrunner', 'Egret', 'Swallow', 'Blackbird', 'Osprey', 'Cuckoo', 'Lark', 'Wren', 'Nightingale', 'Ibis', 'Kookaburra', 'Cassowary', 'Bluebird', 'Loon', 'Sandpiper', 'Grouse', 'Hornbill', 'Kestrel', 'Warbler', 'Cormorant', 'Shoebill', 'Nuthatch', 'Spoonbill', 'Lyrebird', 'Hoopoe', 'Kakapo', 'Quetzal', 'Frigatebird'] },
-  { id: 'sea-creatures', category: 'ANIMALS', prompt: 'Name an animal that lives in the ocean', rankedBy: 'aquarium popularity and how often it appears in media', ranked: ['Shark', 'Whale', 'Dolphin', 'Octopus', 'Jellyfish', 'Starfish|sea star', 'Crab', 'Lobster', 'Shrimp', 'Seahorse', 'Squid', 'Clownfish', 'Sea Turtle|turtle', 'Stingray|ray', 'Seal', 'Sea Lion', 'Eel', 'Tuna', 'Salmon', 'Clam', 'Oyster', 'Orca|killer whale', 'Swordfish', 'Manta Ray', 'Sea Urchin', 'Coral', 'Barracuda', 'Pufferfish|blowfish', 'Walrus', 'Narwhal', 'Anglerfish', 'Mussel', 'Scallop', 'Sardine', 'Cod', 'Marlin', 'Manatee', 'Sea Cucumber', 'Hammerhead Shark|hammerhead', 'Great White Shark|great white', 'Blue Whale', 'Beluga', 'Krill', 'Sea Anemone|anemone', 'Lionfish', 'Mackerel', 'Halibut', 'Plankton', 'Barnacle', 'Moray Eel|moray', 'Sea Otter', 'Humpback Whale|humpback', 'Cuttlefish', 'Nautilus', 'Ocean Sunfish|mola', 'Flounder', 'Grouper', 'Nudibranch|sea slug', 'Dugong', 'Coelacanth', 'Blobfish', 'Hagfish', 'Oarfish', 'Leafy Sea Dragon|sea dragon'] },
-  { id: 'reptiles', category: 'ANIMALS', prompt: 'Name a reptile or amphibian', rankedBy: 'pet-store and zoo popularity', ranked: ['Snake', 'Lizard', 'Turtle', 'Frog', 'Crocodile', 'Alligator', 'Iguana', 'Chameleon', 'Gecko', 'Tortoise', 'Toad', 'Komodo Dragon', 'Salamander', 'Python', 'Cobra', 'Rattlesnake', 'Newt', 'Anaconda', 'Boa Constrictor|boa', 'Gila Monster', 'Bearded Dragon', 'Axolotl', 'Monitor Lizard', 'Viper', 'Black Mamba|mamba', 'Tree Frog', 'Poison Dart Frog', 'Garter Snake', 'Skink', 'Caiman', 'Gharial', 'Basilisk', 'Horned Lizard', 'King Cobra', 'Copperhead', 'Bullfrog', 'Tuatara', 'Thorny Devil', 'Frilled Lizard', 'Caecilian', 'Mudpuppy', 'Hellbender'] },
-  { id: 'insects', category: 'ANIMALS', prompt: 'Name an insect or creepy-crawly', rankedBy: 'everyday encounter frequency and media presence', ranked: ['Ant', 'Bee', 'Butterfly', 'Spider', 'Fly', 'Mosquito', 'Ladybug|ladybird', 'Grasshopper', 'Beetle', 'Cockroach|roach', 'Dragonfly', 'Wasp', 'Moth', 'Cricket', 'Caterpillar', 'Firefly|lightning bug', 'Termite', 'Flea', 'Praying Mantis|mantis', 'Tick', 'Hornet', 'Stick Insect|walking stick', 'Centipede', 'Scorpion', 'Bumblebee', 'Gnat', 'Earwig', 'Cicada', 'Louse|lice', 'Millipede', 'Locust', 'Yellow Jacket', 'Silverfish', 'Weevil', 'Aphid', 'Stink Bug', 'Katydid', 'Horsefly', 'Dung Beetle', 'Water Strider', 'Mayfly', 'Lacewing', 'Damselfly', 'Stag Beetle', 'Bed Bug', 'Fruit Fly', 'Leafcutter Ant', 'Atlas Moth'] },
-  { id: 'cat-breeds', category: 'ANIMALS', prompt: 'Name a breed or type of cat', rankedBy: 'Cat Fanciers’ Association registration rankings', ranked: ['Siamese', 'Persian', 'Maine Coon', 'Sphynx', 'Ragdoll', 'Bengal', 'British Shorthair', 'Tabby', 'Scottish Fold', 'Calico', 'Russian Blue', 'American Shorthair', 'Abyssinian', 'Himalayan', 'Burmese', 'Birman', 'Exotic Shorthair', 'Norwegian Forest Cat', 'Siberian', 'Devon Rex', 'Cornish Rex', 'Savannah', 'Manx', 'Tonkinese', 'Oriental Shorthair', 'Turkish Angora', 'Bombay', 'Egyptian Mau', 'Ocicat', 'Chartreux', 'Balinese', 'Somali', 'Japanese Bobtail', 'LaPerm', 'Munchkin', 'Korat', 'Singapura', 'Toyger', 'Lykoi'] },
-  { id: 'dinosaurs', category: 'ANIMALS', prompt: 'Name a dinosaur or prehistoric reptile', rankedBy: 'appearances in films, toys and museum exhibits', ranked: ['Tyrannosaurus Rex|t rex|trex|tyrannosaurus', 'Triceratops', 'Velociraptor|raptor', 'Stegosaurus', 'Brachiosaurus', 'Pterodactyl|pteranodon', 'Brontosaurus', 'Spinosaurus', 'Diplodocus', 'Ankylosaurus', 'Allosaurus', 'Parasaurolophus', 'Dilophosaurus', 'Apatosaurus', 'Iguanodon', 'Pachycephalosaurus', 'Gallimimus', 'Carnotaurus', 'Compsognathus', 'Giganotosaurus', 'Argentinosaurus', 'Mosasaurus', 'Plesiosaurus', 'Archaeopteryx', 'Deinonychus', 'Utahraptor', 'Oviraptor', 'Baryonyx', 'Therizinosaurus', 'Maiasaura', 'Protoceratops', 'Styracosaurus', 'Edmontosaurus', 'Megalosaurus', 'Troodon', 'Microraptor', 'Coelophysis', 'Herrerasaurus', 'Albertosaurus', 'Suchomimus', 'Kentrosaurus', 'Amargasaurus', 'Quetzalcoatlus', 'Dreadnoughtus', 'Nodosaurus', 'Sinosauropteryx', 'Ceratosaurus', 'Corythosaurus'] },
-
-  // ------------------------------------------------------------------ SCIENCE
-  { id: 'elements', category: 'SCIENCE', prompt: 'Name a chemical element', rankedBy: 'everyday familiarity, then school-curriculum frequency', ranked: ['Oxygen', 'Hydrogen', 'Carbon', 'Gold', 'Iron', 'Helium', 'Nitrogen', 'Silver', 'Copper', 'Sodium', 'Calcium', 'Aluminum|aluminium', 'Lead', 'Chlorine', 'Uranium', 'Neon', 'Zinc', 'Mercury', 'Potassium', 'Magnesium', 'Platinum', 'Silicon', 'Sulfur|sulphur', 'Titanium', 'Tin', 'Lithium', 'Plutonium', 'Nickel', 'Iodine', 'Phosphorus', 'Fluorine', 'Cobalt', 'Argon', 'Radon', 'Chromium', 'Tungsten', 'Radium', 'Krypton', 'Xenon', 'Boron', 'Arsenic', 'Manganese', 'Beryllium', 'Cesium|caesium', 'Bromine', 'Barium', 'Bismuth', 'Cadmium', 'Strontium', 'Palladium', 'Polonium', 'Thorium', 'Gallium', 'Germanium', 'Selenium', 'Antimony', 'Vanadium', 'Molybdenum', 'Osmium', 'Iridium', 'Rubidium', 'Francium', 'Americium', 'Einsteinium', 'Rhodium', 'Zirconium', 'Tellurium', 'Indium', 'Tantalum', 'Scandium', 'Yttrium', 'Lanthanum', 'Cerium', 'Neodymium', 'Europium', 'Gadolinium', 'Curium', 'Nobelium', 'Californium', 'Fermium', 'Mendelevium', 'Lawrencium', 'Niobium', 'Ruthenium', 'Technetium', 'Hafnium', 'Rhenium', 'Thallium', 'Astatine', 'Actinium', 'Protactinium', 'Neptunium', 'Berkelium', 'Promethium', 'Samarium', 'Terbium', 'Dysprosium', 'Holmium', 'Erbium', 'Thulium', 'Ytterbium', 'Lutetium', 'Praseodymium', 'Rutherfordium', 'Dubnium', 'Seaborgium', 'Bohrium', 'Hassium', 'Meitnerium', 'Darmstadtium', 'Roentgenium', 'Copernicium', 'Nihonium', 'Flerovium', 'Moscovium', 'Livermorium', 'Tennessine', 'Oganesson'] },
-  { id: 'moons', category: 'SCIENCE', prompt: 'Name a moon in our solar system', rankedBy: 'size, NASA mission coverage and textbook mentions', ranked: ['The Moon|moon|luna', 'Titan', 'Europa', 'Io', 'Ganymede', 'Callisto', 'Phobos', 'Deimos', 'Triton', 'Enceladus', 'Charon', 'Mimas', 'Titania', 'Oberon', 'Miranda', 'Rhea', 'Iapetus', 'Dione', 'Tethys', 'Ariel', 'Umbriel', 'Hyperion', 'Phoebe', 'Nereid', 'Proteus', 'Amalthea', 'Himalia', 'Puck', 'Pandora', 'Janus', 'Epimetheus', 'Prometheus', 'Larissa', 'Nix', 'Hydra', 'Dysnomia'] },
-  { id: 'constellations', category: 'SCIENCE', prompt: 'Name a constellation', rankedBy: 'visibility, zodiac status and astronomy-book mentions', ranked: ['Orion', 'Big Dipper|ursa major', 'Little Dipper|ursa minor', 'Cassiopeia', 'Scorpius|scorpio', 'Leo', 'Taurus', 'Gemini', 'Aries', 'Sagittarius', 'Pisces', 'Virgo', 'Cancer', 'Libra', 'Capricornus|capricorn', 'Aquarius', 'Andromeda', 'Pegasus', 'Draco', 'Cygnus', 'Perseus', 'Lyra', 'Hercules', 'Southern Cross|crux', 'Centaurus', 'Canis Major', 'Aquila', 'Bootes', 'Cepheus', 'Auriga', 'Canis Minor', 'Corona Borealis', 'Ophiuchus', 'Hydra', 'Phoenix', 'Carina', 'Monoceros', 'Eridanus', 'Lepus', 'Delphinus', 'Columba', 'Vela', 'Sculptor', 'Fornax', 'Pavo', 'Tucana', 'Lupus', 'Camelopardalis', 'Microscopium', 'Mensa'] },
-  { id: 'body-parts', category: 'SCIENCE', prompt: 'Name a part of the human body', rankedBy: 'everyday-vocabulary frequency', ranked: ['Head', 'Hand', 'Arm', 'Leg', 'Foot|feet', 'Eye', 'Nose', 'Mouth', 'Ear', 'Finger', 'Heart', 'Brain', 'Hair', 'Knee', 'Elbow', 'Toe', 'Shoulder', 'Neck', 'Stomach', 'Back', 'Chest', 'Lips', 'Teeth|tooth', 'Tongue', 'Face', 'Skin', 'Lungs', 'Liver', 'Kidney', 'Thumb', 'Ankle', 'Wrist', 'Hip', 'Chin', 'Cheek', 'Forehead', 'Eyebrow', 'Eyelash', 'Belly Button|navel', 'Heel', 'Fingernail|nail', 'Throat', 'Spine', 'Rib', 'Skull', 'Waist', 'Thigh', 'Calf', 'Palm', 'Knuckle', 'Jaw', 'Bladder', 'Intestines|gut', 'Pancreas', 'Appendix', 'Spleen', 'Gallbladder', 'Esophagus', 'Tonsils', 'Earlobe', 'Armpit', 'Shin', 'Nostril', 'Eyelid', 'Temple', 'Uvula', 'Diaphragm', 'Trachea|windpipe', 'Larynx|voice box', 'Cornea', 'Retina', 'Cochlea', 'Thyroid', 'Pituitary Gland|pituitary', 'Hypothalamus', 'Philtrum', 'Septum', 'Cuticle'] },
-  { id: 'bones', category: 'SCIENCE', prompt: 'Name a bone in the human body', rankedBy: 'everyday familiarity, then anatomy-class frequency', ranked: ['Femur', 'Skull|cranium', 'Rib', 'Spine|vertebrae|backbone', 'Tibia', 'Humerus', 'Pelvis|hip bone', 'Fibula', 'Radius', 'Ulna', 'Clavicle|collarbone', 'Jawbone|mandible', 'Sternum|breastbone', 'Scapula|shoulder blade', 'Patella|kneecap', 'Coccyx|tailbone', 'Phalanges|finger bone', 'Sacrum', 'Metacarpals', 'Carpals', 'Tarsals', 'Metatarsals', 'Hyoid', 'Stapes|stirrup', 'Incus|anvil', 'Malleus|hammer', 'Maxilla', 'Calcaneus|heel bone', 'Talus', 'Atlas', 'Axis', 'Ilium', 'Ischium', 'Pubis', 'Zygomatic|cheekbone', 'Nasal Bone', 'Frontal Bone', 'Occipital', 'Parietal', 'Temporal Bone', 'Sphenoid', 'Ethmoid', 'Vomer', 'Lacrimal', 'Scaphoid', 'Lunate', 'Hamate', 'Navicular', 'Cuboid'] },
-  { id: 'scientists', category: 'SCIENCE', prompt: 'Name a famous scientist or inventor', rankedBy: 'how often the name appears in schoolbooks and pop culture', ranked: ['Albert Einstein|einstein', 'Isaac Newton|newton', 'Charles Darwin|darwin', 'Marie Curie|curie', 'Nikola Tesla|tesla', 'Galileo Galilei|galileo', 'Stephen Hawking|hawking', 'Thomas Edison|edison', 'Aristotle', 'Leonardo da Vinci|da vinci', 'Nicolaus Copernicus|copernicus', 'Louis Pasteur|pasteur', 'Alexander Fleming|fleming', 'Gregor Mendel|mendel', 'Neil deGrasse Tyson|neil degrasse tyson', 'Carl Sagan|sagan', 'Ada Lovelace|lovelace', 'Alan Turing|turing', 'Benjamin Franklin|franklin', 'Archimedes', 'Pythagoras', 'Michael Faraday|faraday', 'Johannes Kepler|kepler', 'Niels Bohr|bohr', 'Max Planck|planck', 'Rosalind Franklin', 'Richard Feynman|feynman', 'Robert Oppenheimer|oppenheimer', 'Dmitri Mendeleev|mendeleev', 'Edwin Hubble|hubble', 'James Watson', 'Francis Crick|crick', 'Jane Goodall|goodall', 'Alexander Graham Bell|graham bell', 'Euclid', 'Werner Heisenberg|heisenberg', 'Erwin Schrodinger|schrodinger', 'James Clerk Maxwell|maxwell', 'Antoine Lavoisier|lavoisier', 'Rachel Carson', 'Enrico Fermi|fermi', 'Ernest Rutherford|rutherford', 'Tim Berners-Lee|berners lee', 'Katherine Johnson', 'George Washington Carver|carver', 'Carl Linnaeus|linnaeus', 'Robert Hooke|hooke', 'Paul Dirac|dirac', 'Hypatia', 'Lise Meitner|meitner', 'Barbara McClintock|mcclintock', 'Srinivasa Ramanujan|ramanujan', 'Emmy Noether|noether', 'Alfred Wegener|wegener', 'Tycho Brahe|brahe', 'Chien-Shiung Wu'] },
-  { id: 'car-brands', category: 'SCIENCE', prompt: 'Name a car brand', rankedBy: 'US/European sales plus brand-awareness surveys', ranked: ['Toyota', 'Ford', 'Honda', 'Chevrolet|chevy', 'BMW', 'Mercedes-Benz|mercedes', 'Tesla', 'Ferrari', 'Audi', 'Nissan', 'Lamborghini', 'Porsche', 'Volkswagen|vw', 'Jeep', 'Hyundai', 'Dodge', 'Kia', 'Subaru', 'Mazda', 'Lexus', 'Cadillac', 'Jaguar', 'Land Rover|range rover', 'Volvo', 'Rolls-Royce', 'Bentley', 'Buick', 'GMC', 'Chrysler', 'Mitsubishi', 'Bugatti', 'Maserati', 'Aston Martin', 'Lincoln', 'Fiat', 'Mini', 'Acura', 'Infiniti', 'Ram', 'Alfa Romeo', 'McLaren', 'Peugeot', 'Renault', 'Genesis', 'Suzuki', 'Pontiac', 'Citroen', 'Hummer', 'Rivian', 'Polestar', 'Lotus', 'Skoda', 'Saturn', 'Koenigsegg', 'Pagani', 'Lucid', 'Saab', 'Oldsmobile', 'Plymouth', 'DeLorean', 'Opel', 'Vauxhall', 'Lada', 'BYD', 'Datsun', 'Tata', 'Dacia', 'Seat'] },
-  { id: 'programming-languages', category: 'SCIENCE', prompt: 'Name a programming language', rankedBy: 'developer-survey usage and job-posting volume', ranked: ['Python', 'JavaScript|js', 'Java', 'C++|c plus plus|cpp', 'HTML', 'C', 'C#|c sharp|csharp', 'SQL', 'PHP', 'Ruby', 'Swift', 'TypeScript', 'Go|golang', 'Rust', 'Kotlin', 'CSS', 'R', 'Scratch', 'Assembly', 'MATLAB', 'Perl', 'Visual Basic|vb', 'Scala', 'Dart', 'Lua', 'Haskell', 'Objective-C', 'Bash|shell', 'Fortran', 'COBOL', 'Lisp', 'Julia', 'Pascal', 'Elixir', 'Clojure', 'Erlang', 'Groovy', 'F#|f sharp', 'Prolog', 'OCaml', 'Zig', 'Ada', 'Smalltalk', 'Solidity', 'Elm', 'Racket', 'Nim', 'Crystal', 'BASIC'] },
-
-  // ------------------------------------------------------- MOVIES / TV / GAMES
-  { id: 'pixar-movies', category: 'MOVIES', prompt: 'Name a Pixar movie', rankedBy: 'box office plus cultural staying power', ranked: ['Toy Story', 'Finding Nemo', 'Cars', 'Up', 'Monsters, Inc.|monsters inc', 'The Incredibles', 'Inside Out', 'Coco', 'Ratatouille', 'WALL-E|walle', 'Toy Story 2', 'Toy Story 3', 'Finding Dory', 'Brave', "A Bug's Life|bugs life", 'Monsters University', 'Inside Out 2', 'Incredibles 2', 'Toy Story 4', 'Soul', 'Cars 2', 'Cars 3', 'Luca', 'Turning Red', 'Onward', 'Lightyear', 'The Good Dinosaur', 'Elemental', 'Elio'] },
-  { id: 'disney-animated', category: 'MOVIES', prompt: 'Name a Disney animated movie (not Pixar)', rankedBy: 'box office plus cultural staying power', ranked: ['The Lion King', 'Frozen', 'Aladdin', 'Beauty and the Beast', 'The Little Mermaid', 'Snow White|snow white and the seven dwarfs', 'Cinderella', 'Moana', 'Tangled', 'Mulan', 'Sleeping Beauty', 'Pinocchio', 'Bambi', 'Dumbo', 'The Jungle Book', 'Peter Pan', 'Lady and the Tramp', '101 Dalmatians|one hundred and one dalmatians', 'Pocahontas', 'Hercules', 'Tarzan', 'Lilo & Stitch|lilo and stitch', 'Zootopia', 'Encanto', 'Big Hero 6', 'Wreck-It Ralph', 'Frozen II|frozen 2', 'Alice in Wonderland', 'The Princess and the Frog', 'Fantasia', 'The Hunchback of Notre Dame|hunchback', 'Bolt', 'Robin Hood', 'The Aristocats', "The Emperor's New Groove|emperors new groove", 'Raya and the Last Dragon|raya', 'Treasure Planet', 'Atlantis: The Lost Empire|atlantis', 'The Fox and the Hound', 'Chicken Little', 'Meet the Robinsons', 'Brother Bear', 'Wish', 'Oliver & Company|oliver and company', 'The Rescuers', 'The Sword in the Stone', 'Strange World', 'Home on the Range', 'Dinosaur', 'The Great Mouse Detective', 'The Black Cauldron', 'The Many Adventures of Winnie the Pooh|winnie the pooh', 'Fantasia 2000', 'Moana 2', 'Ralph Breaks the Internet', 'Saludos Amigos', 'The Three Caballeros', 'Melody Time', 'Make Mine Music', 'Fun and Fancy Free'] },
-  { id: 'marvel-characters', category: 'MOVIES', prompt: 'Name a Marvel hero or villain', rankedBy: 'MCU screen time, box office and comic sales', ranked: ['Spider-Man|peter parker', 'Iron Man|tony stark', 'Captain America|steve rogers', 'Thor', 'Hulk|bruce banner', 'Black Widow|natasha romanoff', 'Wolverine|logan', 'Black Panther|tchalla', 'Deadpool', 'Thanos', 'Doctor Strange|dr strange', 'Loki', 'Captain Marvel|carol danvers', 'Hawkeye', 'Groot', 'Ant-Man', 'Star-Lord|peter quill', 'Scarlet Witch|wanda', 'Vision', 'Rocket|rocket raccoon', 'Gamora', 'Venom', 'Magneto', 'Storm', 'Professor X|charles xavier', 'Falcon', 'Winter Soldier|bucky', 'Daredevil', 'Nick Fury', 'Wasp', 'Drax', 'Silver Surfer', 'Cyclops', 'Jean Grey', 'Rogue', 'Ghost Rider', 'Mystique', 'Green Goblin', 'Doctor Doom|dr doom', 'Punisher', 'Gambit', 'Nebula', 'Mantis', 'Ultron', 'Shang-Chi', 'Ms. Marvel|kamala khan', 'Moon Knight', 'She-Hulk', 'Mister Fantastic|mr fantastic|reed richards', 'Human Torch', 'Invisible Woman', 'The Thing', 'Galactus', 'Beast', 'Nightcrawler', 'Iceman', 'Colossus', 'Juggernaut', 'Kang', 'Red Skull', 'Kingpin', 'Carnage', 'Okoye', 'Wong', 'Blade', 'Luke Cage', 'Jessica Jones', 'Iron Fist', 'Elektra', 'Quicksilver', 'Squirrel Girl', 'Howard the Duck', 'Adam Warlock', 'Namor', 'Black Bolt', 'Sentry', 'Cable', 'Bishop', 'Dazzler', 'Morbius', 'Mephisto'] },
-  { id: 'harry-potter', category: 'MOVIES', prompt: 'Name a Harry Potter character', rankedBy: 'screen time and page mentions across the series', ranked: ['Harry Potter|harry', 'Hermione Granger|hermione', 'Ron Weasley|ron', 'Albus Dumbledore|dumbledore', 'Lord Voldemort|voldemort|tom riddle', 'Severus Snape|snape', 'Rubeus Hagrid|hagrid', 'Draco Malfoy|draco|malfoy', 'Sirius Black|sirius', 'Dobby', 'Neville Longbottom|neville', 'Ginny Weasley|ginny', 'Luna Lovegood|luna', 'Fred Weasley|fred', 'George Weasley|george', 'Minerva McGonagall|mcgonagall', 'Bellatrix Lestrange|bellatrix', 'Dolores Umbridge|umbridge', 'Remus Lupin|lupin', 'Hedwig', 'Cedric Diggory|cedric', 'Lucius Malfoy|lucius', 'Gilderoy Lockhart|lockhart', 'Peter Pettigrew|wormtail', 'Mad-Eye Moody|moody', 'Cho Chang', 'Arthur Weasley', 'Molly Weasley', 'Percy Weasley|percy', 'Nearly Headless Nick', 'Dudley Dursley|dudley', 'Vernon Dursley', 'Petunia Dursley', 'Argus Filch|filch', 'Kreacher', 'Fawkes', 'Crookshanks', 'Lily Potter', 'James Potter', 'Nagini', 'Buckbeak', 'Fleur Delacour|fleur', 'Viktor Krum|krum', 'Bill Weasley', 'Charlie Weasley', 'Nymphadora Tonks|tonks', 'Horace Slughorn|slughorn', 'Quirinus Quirrell|quirrell', 'Gellert Grindelwald|grindelwald', 'Aragog', 'Fluffy', 'Moaning Myrtle|myrtle', 'Seamus Finnigan|seamus', 'Dean Thomas', 'Oliver Wood', 'Madam Pomfrey|pomfrey', 'Sybill Trelawney|trelawney', 'Filius Flitwick|flitwick', 'Pomona Sprout|sprout', 'Ollivander', 'Kingsley Shacklebolt|kingsley', 'Lavender Brown', 'Scabbers', 'Peeves', 'Hannah Abbott', 'Parvati Patil', 'Padma Patil', 'Griphook', 'Winky', 'Fenrir Greyback', 'Aberforth Dumbledore|aberforth', 'Rita Skeeter', 'Cornelius Fudge|fudge', 'Barty Crouch', 'Vincent Crabbe|crabbe', 'Gregory Goyle|goyle', 'Pansy Parkinson', 'Xenophilius Lovegood', 'Mundungus Fletcher'] },
-  { id: 'star-wars', category: 'MOVIES', prompt: 'Name a Star Wars character', rankedBy: 'screen time across films and series plus merch sales', ranked: ['Luke Skywalker|luke', 'Darth Vader|vader|anakin skywalker|anakin', 'Han Solo|han', 'Princess Leia|leia', 'Yoda', 'Chewbacca|chewie', 'R2-D2|r2d2', 'C-3PO|c3po', 'Obi-Wan Kenobi|obi wan|kenobi', 'Darth Maul|maul', 'Emperor Palpatine|palpatine|darth sidious', 'Boba Fett', 'Kylo Ren|ben solo', 'Rey', 'BB-8', 'Jabba the Hutt|jabba', 'Grogu|baby yoda', 'The Mandalorian|mandalorian|din djarin|mando', 'Padme Amidala|padme', 'Lando Calrissian|lando', 'Jar Jar Binks|jar jar', 'Finn', 'Poe Dameron|poe', 'Count Dooku|dooku', 'Mace Windu|windu', 'Qui-Gon Jinn|qui gon', 'Stormtrooper', 'Ahsoka Tano|ahsoka', 'General Grievous|grievous', 'Jyn Erso', 'Wicket|ewok', 'Admiral Ackbar|ackbar', 'Grand Moff Tarkin|tarkin', 'Jango Fett', 'Cassian Andor|andor', 'K-2SO', 'Captain Phasma|phasma', 'Supreme Leader Snoke|snoke', 'Rose Tico', 'Greedo', 'Watto', 'Bossk', 'IG-88', 'Wedge Antilles|wedge', 'Nien Nunb', 'Darth Plagueis', 'Sabine Wren', 'Ezra Bridger', 'Kanan Jarrus', 'Hera Syndulla', 'Grand Admiral Thrawn|thrawn', 'Moff Gideon', 'Cad Bane', 'Asajj Ventress|ventress', 'Bo-Katan', 'Fennec Shand', 'Bib Fortuna', 'Max Rebo', 'Salacious Crumb'] },
-  { id: 'pokemon', category: 'GAMES', prompt: 'Name a Pokémon', rankedBy: 'popularity polls, anime screen time and merch sales', ranked: ['Pikachu', 'Charizard', 'Bulbasaur', 'Squirtle', 'Charmander', 'Mewtwo', 'Eevee', 'Jigglypuff', 'Snorlax', 'Mew', 'Psyduck', 'Meowth', 'Gengar', 'Lucario', 'Gyarados', 'Magikarp', 'Blastoise', 'Venusaur', 'Dragonite', 'Onix', 'Togepi', 'Machamp', 'Greninja', 'Lapras', 'Vaporeon', 'Jolteon', 'Flareon', 'Umbreon', 'Espeon', 'Sylveon', 'Arcanine', 'Growlithe', 'Pichu', 'Raichu', 'Ditto', 'Rayquaza', 'Lugia', 'Ho-Oh', 'Butterfree', 'Caterpie', 'Pidgey', 'Rattata', 'Zubat', 'Geodude', 'Slowpoke', 'Cubone', 'Abra', 'Alakazam', 'Haunter', 'Gastly', 'Vulpix', 'Ninetales', 'Clefairy', 'Chikorita', 'Cyndaquil', 'Totodile', 'Treecko', 'Torchic', 'Mudkip', 'Piplup', 'Chimchar', 'Turtwig', 'Garchomp', 'Gardevoir', 'Blaziken', 'Metagross', 'Tyranitar', 'Scizor', 'Scyther', 'Marowak', 'Wobbuffet', 'Mimikyu', 'Rowlet', 'Litten', 'Popplio', 'Sprigatito', 'Fuecoco', 'Quaxly', 'Wooper', 'Bidoof', 'Hoothoot', 'Shuckle', 'Spheal', 'Klefki', 'Dedenne', 'Stunfisk', 'Luvdisc', 'Bronzong', 'Sudowoodo', 'Kecleon', 'Furret'] },
-  { id: 'nintendo-characters', category: 'GAMES', prompt: 'Name a Nintendo video game character', rankedBy: 'franchise sales and Smash Bros popularity polls', ranked: ['Mario', 'Luigi', 'Princess Peach|peach', 'Bowser', 'Link', 'Princess Zelda|zelda', 'Donkey Kong', 'Yoshi', 'Pikachu', 'Kirby', 'Samus Aran|samus', 'Wario', 'Toad', 'Fox McCloud|fox', 'Ganondorf|ganon', 'Diddy Kong', 'Captain Falcon', 'Ness', 'Waluigi', 'Princess Daisy|daisy', 'Rosalina', 'Isabelle', 'Tom Nook', 'Villager', 'Bowser Jr.', 'Boo', 'Goomba', 'Koopa Troopa', 'Shy Guy', 'King K. Rool', 'Meta Knight', 'King Dedede', 'Marth', 'Falco', 'Inkling', 'Olimar', 'Pit', 'Ridley', 'Lakitu', 'Chain Chomp', 'Toadette', 'Birdo', 'Pauline', 'Captain Toad', 'Dry Bones', 'Shulk', 'Ike', 'Lucina', 'Wolf O’Donnell|wolf', 'Lucas', 'Palutena', 'Dark Pit', 'Little Mac', 'Duck Hunt Dog'] },
-  { id: 'sitcoms', category: 'TV', prompt: 'Name a TV sitcom', rankedBy: 'ratings, streaming hours and syndication reach', ranked: ['Friends', 'The Office', 'Seinfeld', 'The Big Bang Theory', 'How I Met Your Mother|himym', 'Parks and Recreation|parks and rec', 'Modern Family', 'Brooklyn Nine-Nine|brooklyn 99', 'The Simpsons', 'Cheers', 'Frasier', 'Two and a Half Men', 'Family Guy', 'The Fresh Prince of Bel-Air|fresh prince', 'Full House', 'Arrested Development', 'Curb Your Enthusiasm|curb', "It's Always Sunny in Philadelphia|always sunny", 'Everybody Loves Raymond', 'I Love Lucy', "That '70s Show|that 70s show", "Schitt's Creek", 'Scrubs', 'New Girl', 'Community', '30 Rock', 'Abbott Elementary', 'Ted Lasso', 'Married... with Children', 'Happy Days', 'The Golden Girls', 'Malcolm in the Middle', 'Home Improvement', 'Family Matters', 'Saved by the Bell', 'Boy Meets World', 'Will & Grace|will and grace', 'M*A*S*H|mash', 'The Good Place', 'Veep', 'Silicon Valley', 'What We Do in the Shadows', 'Superstore', 'Black-ish', 'The King of Queens', 'Taxi', 'Roseanne', 'The Jeffersons', 'Night Court', 'Fawlty Towers', 'The IT Crowd', 'Peep Show', 'Blackadder', 'Mork & Mindy', "Gilligan's Island", 'The Brady Bunch', 'Bewitched', 'Leave It to Beaver', 'The Honeymooners', 'Get Smart', 'Spaced'] },
-  { id: 'board-games', category: 'GAMES', prompt: 'Name a board game', rankedBy: 'all-time sales and household ownership surveys', ranked: ['Monopoly', 'Chess', 'Scrabble', 'Clue|cluedo', 'Checkers|draughts', 'Candy Land', 'Risk', 'Sorry!', 'The Game of Life|game of life', 'Battleship', 'Trivial Pursuit', 'Connect Four|connect 4', 'Operation', 'Guess Who?', 'Chutes and Ladders|snakes and ladders', 'Catan|settlers of catan', 'Jenga', 'Pictionary', 'Mouse Trap', 'Yahtzee', 'Backgammon', 'Stratego', 'Ticket to Ride', 'Mancala', 'Trouble', 'Othello|reversi', 'Go', 'Pandemic', 'Hungry Hungry Hippos', 'Boggle', 'Cranium', 'Taboo', 'Apples to Apples', 'Mastermind', 'Carcassonne', 'Codenames', 'Parcheesi|ludo', 'Twister', 'Axis & Allies', 'Dungeons & Dragons|dungeons and dragons|dnd', 'Azul', 'Splendor', 'Dixit', 'Wingspan', 'Terraforming Mars', '7 Wonders|seven wonders', 'Blokus', 'Qwirkle', 'Sequence', 'Rummikub', 'Chinese Checkers', 'Gloomhaven', 'Agricola', 'Puerto Rico', 'Power Grid', 'Diplomacy', 'Twilight Imperium'] },
-
-  // ------------------------------------------------------------ MUSIC & ARTS
-  { id: 'beatles-songs', category: 'MUSIC', prompt: 'Name a Beatles song', rankedBy: 'streaming counts and chart performance', ranked: ['Hey Jude', 'Let It Be', 'Yesterday', 'Here Comes the Sun', 'Yellow Submarine', 'Come Together', 'Twist and Shout', 'All You Need Is Love', 'Help!', 'I Want to Hold Your Hand', "A Hard Day's Night", 'Eleanor Rigby', 'Penny Lane', 'Strawberry Fields Forever|strawberry fields', 'Blackbird', 'Something', 'Love Me Do', "Can't Buy Me Love", 'Lucy in the Sky with Diamonds|lucy in the sky', 'Ob-La-Di, Ob-La-Da|obladi oblada', 'Revolution', 'Get Back', 'In My Life', 'She Loves You', "Octopus's Garden|octopus garden", 'Ticket to Ride', 'With a Little Help from My Friends', "Sgt. Pepper's Lonely Hearts Club Band|sgt peppers|sergeant pepper", 'While My Guitar Gently Weeps', 'Norwegian Wood', 'Paperback Writer', 'Day Tripper', 'Drive My Car', 'Michelle', 'Eight Days a Week', 'Nowhere Man', 'The Long and Winding Road', 'Back in the U.S.S.R.|back in the ussr', 'A Day in the Life', 'I Saw Her Standing There', 'Across the Universe', 'Here, There and Everywhere', 'Helter Skelter', 'Hello, Goodbye', 'Taxman', 'Got to Get You into My Life', 'Dear Prudence', 'I Am the Walrus', 'Rain', 'Please Please Me', 'From Me to You', 'And I Love Her', 'Girl', 'Julia', 'Golden Slumbers', "Don't Let Me Down", 'Two of Us', 'Tomorrow Never Knows', 'Rocky Raccoon', "Mother Nature's Son", "I've Just Seen a Face", 'For No One', 'Martha My Dear', 'Savoy Truffle'] },
-  { id: 'instruments', category: 'MUSIC', prompt: 'Name a musical instrument', rankedBy: 'how many people play or recognize it (school programs, sales)', ranked: ['Guitar', 'Piano', 'Drums', 'Violin', 'Flute', 'Trumpet', 'Saxophone|sax', 'Bass Guitar|bass', 'Cello', 'Clarinet', 'Harp', 'Ukulele', 'Trombone', 'Keyboard', 'Harmonica', 'Tuba', 'Banjo', 'Xylophone', 'Accordion', 'Tambourine', 'Viola', 'French Horn|horn', 'Oboe', 'Recorder', 'Bagpipes', 'Organ', 'Triangle', 'Cymbals', 'Double Bass|upright bass|contrabass', 'Mandolin', 'Bongos', 'Synthesizer|synth', 'Bassoon', 'Maracas', 'Glockenspiel', 'Sitar', 'Harpsichord', 'Piccolo', 'Kazoo', 'Steel Drum|steel pan', 'Timpani', 'Cowbell', 'Castanets', 'Didgeridoo', 'Marimba', 'Lute', 'Djembe', 'Theremin', 'Bugle', 'Cornet', 'Euphonium', 'Sousaphone', 'Lyre', 'Zither', 'Dulcimer', 'Ocarina', 'Shamisen', 'Erhu', 'Koto', 'Tabla', 'Bouzouki', 'Balalaika', 'Kalimba|mbira', 'Hurdy-Gurdy', 'Oud', 'Pan Flute|panpipes', 'Cajon', 'Vibraphone', 'Celesta', 'Melodica'] },
-  { id: 'painters', category: 'ARTS', prompt: 'Name a famous painter or visual artist', rankedBy: 'museum attendance, auction records and textbook mentions', ranked: ['Leonardo da Vinci|da vinci|leonardo', 'Vincent van Gogh|van gogh', 'Pablo Picasso|picasso', 'Michelangelo', 'Claude Monet|monet', 'Salvador Dali|dali', 'Andy Warhol|warhol', 'Rembrandt', 'Frida Kahlo|frida|kahlo', 'Bob Ross', "Georgia O'Keeffe|okeeffe", 'Raphael', 'Jackson Pollock|pollock', 'Edvard Munch|munch', 'Henri Matisse|matisse', 'Johannes Vermeer|vermeer', 'Pierre-Auguste Renoir|renoir', 'Edgar Degas|degas', 'Paul Cezanne|cezanne', 'Gustav Klimt|klimt', 'Norman Rockwell|rockwell', 'Banksy', 'Jean-Michel Basquiat|basquiat', 'Roy Lichtenstein|lichtenstein', 'Keith Haring|haring', 'Wassily Kandinsky|kandinsky', 'Rene Magritte|magritte', 'Paul Gauguin|gauguin', 'Edward Hopper|hopper', 'Caravaggio', 'Sandro Botticelli|botticelli', 'Francisco Goya|goya', 'Mark Rothko|rothko', 'Diego Rivera|rivera', 'Edouard Manet|manet', 'Titian', 'El Greco', 'Hieronymus Bosch|bosch', 'Jan van Eyck|van eyck', 'J.M.W. Turner|turner', 'John Constable|constable', 'Piet Mondrian|mondrian', 'Joan Miro|miro', 'Marc Chagall|chagall', 'Georges Seurat|seurat', 'Henri de Toulouse-Lautrec|toulouse lautrec', 'Yayoi Kusama|kusama', 'Katsushika Hokusai|hokusai', 'Artemisia Gentileschi|gentileschi', 'Pieter Bruegel|bruegel', 'Albrecht Durer|durer', 'Egon Schiele|schiele', 'Amedeo Modigliani|modigliani', 'Camille Pissarro|pissarro', 'Mary Cassatt|cassatt', 'Grant Wood', 'James McNeill Whistler|whistler', 'Winslow Homer', 'David Hockney|hockney', 'Lucian Freud'] },
-  { id: 'shakespeare', category: 'ARTS', prompt: 'Name a Shakespeare play', rankedBy: 'performance frequency and school-curriculum use', ranked: ['Romeo and Juliet', 'Hamlet', 'Macbeth', "A Midsummer Night's Dream|midsummer nights dream", 'Othello', 'King Lear', 'Julius Caesar', 'The Tempest', 'Much Ado About Nothing', 'Twelfth Night', 'The Merchant of Venice', 'The Taming of the Shrew', 'As You Like It', 'Antony and Cleopatra', 'Richard III|richard the third|richard 3', 'Henry V|henry the fifth|henry 5', 'The Comedy of Errors', "The Winter's Tale", 'Measure for Measure', "All's Well That Ends Well", 'Coriolanus', 'Titus Andronicus', 'The Merry Wives of Windsor', 'Richard II|richard 2', 'Henry IV, Part 1|henry iv|henry 4', 'Henry VIII|henry 8', "Love's Labour's Lost", 'The Two Gentlemen of Verona', 'Troilus and Cressida', 'Cymbeline', 'Pericles', 'Timon of Athens', 'King John', 'Henry VI, Part 1|henry vi|henry 6', 'Henry IV, Part 2', 'Henry VI, Part 2', 'Henry VI, Part 3', 'The Two Noble Kinsmen'] },
-  { id: 'greek-gods', category: 'ARTS', prompt: 'Name a god, goddess or titan from Greek mythology', rankedBy: 'appearances in films, books and school myth units', ranked: ['Zeus', 'Poseidon', 'Hades', 'Athena', 'Apollo', 'Aphrodite', 'Ares', 'Hermes', 'Hera', 'Artemis', 'Dionysus', 'Hephaestus', 'Demeter', 'Persephone', 'Kronos|cronus', 'Eros', 'Nike', 'Gaia', 'Hestia', 'Pan', 'Nemesis', 'Hecate', 'Atlas', 'Prometheus', 'Helios', 'Selene', 'Eos', 'Uranus', 'Rhea', 'Hypnos', 'Thanatos', 'Morpheus', 'Iris', 'Hebe', 'Tyche', 'Asclepius', 'Nyx', 'Chaos', 'Oceanus', 'Hyperion', 'Themis', 'Mnemosyne', 'Triton', 'Aeolus', 'Boreas', 'Erebus', 'Tartarus', 'Eris', 'Phobos', 'Deimos', 'Harmonia', 'Metis'] },
-
-  // ------------------------------------------------------- WORLD & EVERYDAY
-  { id: 'us-presidents', category: 'HISTORY', prompt: 'Name a US president', rankedBy: 'historian rankings blended with modern name recognition', ranked: ['George Washington|washington', 'Abraham Lincoln|lincoln|abe lincoln', 'Barack Obama|obama', 'Donald Trump|trump', 'Joe Biden|biden', 'John F. Kennedy|jfk|kennedy', 'Thomas Jefferson|jefferson', 'Franklin D. Roosevelt|fdr|franklin roosevelt', 'Theodore Roosevelt|teddy roosevelt', 'Ronald Reagan|reagan', 'Bill Clinton|clinton', 'George W. Bush|bush|dubya', 'George H. W. Bush|bush senior', 'Richard Nixon|nixon', 'Jimmy Carter|carter', 'Dwight D. Eisenhower|eisenhower|ike', 'Harry S. Truman|truman', 'John Adams', 'Andrew Jackson', 'James Madison|madison', 'Ulysses S. Grant|grant', 'Woodrow Wilson|wilson', 'James Monroe|monroe', 'Lyndon B. Johnson|lbj|lyndon johnson', 'Gerald Ford|ford', 'John Quincy Adams', 'Herbert Hoover|hoover', 'Calvin Coolidge|coolidge', 'William Howard Taft|taft', 'Andrew Johnson', 'William McKinley|mckinley', 'Grover Cleveland|cleveland', 'James K. Polk|polk', 'Warren G. Harding|harding', 'Martin Van Buren|van buren', 'William Henry Harrison', 'Benjamin Harrison', 'Zachary Taylor', 'Rutherford B. Hayes|hayes', 'James Garfield|garfield', 'Chester A. Arthur|chester arthur', 'Franklin Pierce', 'James Buchanan|buchanan', 'John Tyler|tyler', 'Millard Fillmore|fillmore'] },
-  { id: 'languages', category: 'WORLD', prompt: 'Name a language', rankedBy: 'number of speakers plus how often it is studied', ranked: ['English', 'Spanish', 'French', 'Chinese|mandarin', 'German', 'Japanese', 'Italian', 'Russian', 'Arabic', 'Portuguese', 'Hindi', 'Korean', 'Latin', 'Greek', 'Dutch', 'Swedish', 'Hebrew', 'Turkish', 'Polish', 'Cantonese', 'Vietnamese', 'Thai', 'Bengali', 'Urdu', 'Swahili', 'Tagalog|filipino', 'Irish|gaelic', 'Norwegian', 'Danish', 'Finnish', 'Persian|farsi', 'Punjabi', 'Indonesian', 'Ukrainian', 'Czech', 'Hungarian', 'Romanian', 'Welsh', 'American Sign Language|asl|sign language', 'Tamil', 'Malay', 'Telugu', 'Esperanto', 'Icelandic', 'Navajo', 'Yiddish', 'Zulu', 'Afrikaans', 'Hawaiian', 'Catalan', 'Basque', 'Serbian', 'Croatian', 'Amharic', 'Gujarati', 'Marathi', 'Quechua', 'Maori', 'Klingon', 'Mongolian', 'Somali', 'Yoruba', 'Hausa', 'Tibetan', 'Sanskrit', 'Cherokee'] },
-  { id: 'colors', category: 'WORLD', prompt: 'Name a color', rankedBy: 'frequency in everyday English', ranked: ['Red', 'Blue', 'Green', 'Yellow', 'Purple', 'Orange', 'Pink', 'Black', 'White', 'Brown', 'Gray|grey', 'Teal', 'Turquoise', 'Gold', 'Silver', 'Navy Blue|navy', 'Maroon', 'Violet', 'Indigo', 'Beige', 'Magenta', 'Cyan', 'Lavender', 'Lime', 'Tan', 'Crimson', 'Peach', 'Coral', 'Olive', 'Burgundy', 'Aqua', 'Mint', 'Salmon', 'Ivory', 'Cream', 'Khaki', 'Charcoal', 'Lilac', 'Fuchsia', 'Mustard', 'Scarlet', 'Amber', 'Bronze', 'Plum', 'Rose', 'Emerald', 'Sapphire', 'Ruby', 'Periwinkle', 'Taupe', 'Mauve', 'Chartreuse', 'Vermilion', 'Cerulean', 'Ochre', 'Sienna', 'Mahogany', 'Cobalt', 'Sepia', 'Puce', 'Celadon', 'Wisteria', 'Viridian', 'Gamboge', 'Zaffre', 'Coquelicot'] },
-  { id: 'jobs', category: 'WORLD', prompt: 'Name a job or profession', rankedBy: 'how often kids and adults name it in career surveys', ranked: ['Doctor', 'Teacher', 'Nurse', 'Lawyer', 'Firefighter', 'Police Officer|cop|policeman', 'Engineer', 'Chef|cook', 'Dentist', 'Pilot', 'Accountant', 'Farmer', 'Scientist', 'Actor|actress', 'Artist', 'Software Developer|programmer|software engineer|coder|developer', 'Plumber', 'Electrician', 'Mechanic', 'Veterinarian|vet', 'Astronaut', 'Architect', 'Musician', 'Writer|author', 'Soldier', 'Cashier', 'Waiter|waitress|server', 'Carpenter', 'Pharmacist', 'Banker', 'Surgeon', 'Judge', 'Photographer', 'Journalist|reporter', 'Mail Carrier|mailman|postman', 'Barber', 'Hairdresser|hairstylist', 'Truck Driver', 'Librarian', 'Janitor|custodian', 'Professor', 'Psychologist', 'Therapist', 'Athlete', 'Construction Worker', 'Salesperson', 'Secretary', 'Designer', 'Real Estate Agent|realtor', 'Paramedic', 'Baker', 'Butcher', 'Lifeguard', 'Flight Attendant', 'Zookeeper', 'Tailor', 'Florist', 'Translator', 'Bartender', 'Detective', 'Economist', 'Optometrist', 'Welder', 'Locksmith', 'Geologist', 'Archaeologist', 'Sommelier', 'Actuary', 'Taxidermist', 'Cartographer', 'Blacksmith', 'Cobbler', 'Glassblower', 'Chimney Sweep', 'Lighthouse Keeper', 'Farrier', 'Luthier'] },
-  { id: 'clothing-brands', category: 'WORLD', prompt: 'Name a clothing or sneaker brand', rankedBy: 'global revenue and brand-awareness rankings', ranked: ['Nike', 'Adidas', 'Gucci', "Levi's", 'Puma', 'Under Armour', 'Gap', 'Louis Vuitton', 'Zara', 'H&M|h and m', 'Ralph Lauren|polo', 'Calvin Klein', 'Tommy Hilfiger', 'Converse', 'Vans', 'Chanel', 'Prada', 'Old Navy', 'Reebok', 'The North Face|north face', 'Supreme', 'New Balance', 'Lululemon', 'Versace', 'Champion', 'Uniqlo', 'Hollister', 'Abercrombie & Fitch|abercrombie', 'American Eagle', 'Burberry', 'Patagonia', 'Columbia', 'Armani', 'Hermes', 'Dior', 'Balenciaga', 'Lacoste', 'Skechers', 'Timberland', 'Off-White', 'Fila', 'Asics', 'Dolce & Gabbana|dolce and gabbana', 'Fendi', 'Yeezy', 'Carhartt', 'Banana Republic', 'J.Crew', 'Givenchy', 'Stussy', 'A Bathing Ape|bape', 'Kappa', 'Le Coq Sportif', 'Hoka', 'On Running', 'Saucony', 'Mizuno', 'Umbro', 'Ellesse', 'Diadora'] },
-  { id: 'apps', category: 'WORLD', prompt: 'Name an app or website', rankedBy: 'monthly active users and download charts', ranked: ['YouTube', 'Instagram', 'TikTok', 'Facebook', 'Google', 'Snapchat', 'Twitter|x', 'WhatsApp', 'Netflix', 'Spotify', 'Amazon', 'Reddit', 'Pinterest', 'Discord', 'LinkedIn', 'Uber', 'Gmail', 'Zoom', 'Twitch', 'Wikipedia', 'Messenger', 'Telegram', 'Duolingo', 'Roblox', 'eBay', 'Airbnb', 'Venmo', 'PayPal', 'Tinder', 'Shazam', 'Waze', 'Google Maps', 'Threads', 'DoorDash', 'Lyft', 'Hulu', 'Disney+|disney plus', 'Pandora', 'Grubhub', 'Tumblr', 'Etsy', 'Yelp', 'BeReal', 'Signal', 'Slack', 'Dropbox', 'Skype', 'Vimeo', 'Quora', 'Cash App', 'Robinhood', 'Strava', 'Letterboxd', 'Goodreads', 'Bumble', 'Hinge', 'Nextdoor', 'Flickr', 'MySpace', 'Vine', 'Clubhouse', 'Mastodon', 'Bluesky'] },
-  { id: 'holidays', category: 'WORLD', prompt: 'Name a holiday or festival', rankedBy: 'US/UK observance and greeting-card sales, then global festivals', ranked: ['Christmas', 'Halloween', 'Thanksgiving', 'Easter', "New Year's Day|new years", "Valentine's Day|valentines", 'Fourth of July|independence day|july 4th', 'Hanukkah|chanukah', "St. Patrick's Day|saint patricks day", "Mother's Day", "Father's Day", 'Labor Day', 'Memorial Day', 'Christmas Eve', "New Year's Eve", 'Diwali', 'Ramadan', 'Eid|eid al fitr', 'Martin Luther King Jr. Day|mlk day', 'Kwanzaa', 'Passover', 'Lunar New Year|chinese new year', 'Cinco de Mayo', 'Veterans Day', "Presidents' Day", 'Groundhog Day', 'Columbus Day|indigenous peoples day', 'Mardi Gras', 'Earth Day', "April Fools' Day|april fools", 'Boxing Day', 'Yom Kippur', 'Rosh Hashanah', 'Day of the Dead|dia de los muertos', 'Juneteenth', 'Good Friday', 'Holi', 'Oktoberfest', 'Bastille Day', 'Canada Day', 'Bonfire Night|guy fawkes night', 'Ash Wednesday', 'Pi Day', 'Arbor Day', 'Flag Day', 'Purim', 'Hanami', 'Vesak', 'Songkran', 'Obon', 'Nowruz', 'Epiphany', 'Festivus'] },
-];
-
-const buildRankedPrompt = (p) => {
-  const seen = new Set();
-  const entries = p.ranked.filter((e) => {
-    const key = e.split('|')[0].toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  const n = entries.length;
-  return {
-    id: p.id,
-    category: p.category,
-    prompt: p.prompt,
-    rankedBy: p.rankedBy,
-    answers: entries.map((entry, i) => {
-      const [text, ...aliases] = entry.split('|');
-      const share = (i + 0.5) / n; // position in the list, 0 = most common
-      const tier = 1 + RARITY_CUTOFFS.filter((c) => share >= c).length;
-      return { text, aliases, tier, rank: i + 1 };
-    }),
-  };
-};
-
-export const TRIVIA_BANK = [...CUSTOM_PROMPTS, ...RANKED_PROMPTS.map(buildRankedPrompt)];
+export { TRIVIA_BANK, RARITY_CUTOFFS };
 
 /* =============================================================================
    2. GAME_CONFIG  (tune the feel of the game here)
@@ -203,6 +71,26 @@ export const GAME_CONFIG = {
     whiffs: ['Uhh... Pluto?', 'ERROR 404', 'Beep boop?', 'Toaster', '...', 'Blernsday', 'NULL', 'Potato?'],
   },
 
+  // Real-time play (positions are in canvas pixels; the field is 320x180)
+  arcade: {
+    runSpeed: 58,
+    carrySpeedMult: 0.92,
+    tennisSpeedMult: 1.3,
+    soccerSeconds: 150,
+    basketballSeconds: 150,
+    footballDrives: 3,
+    tackleRange: 9,
+    humanTackleChance: 0.55,
+    humanStealChance: 0.45,
+    cpuStealPerSec: 0.8,
+    stunSeconds: 0.6,
+    passSpeed: { 5: 200, 4: 180, 3: 140, 2: 105, 1: 95, 0: 115 },
+    soccerSave: { 5: 0.05, 4: 0.28, 3: 0.52, 2: 0.74, 1: 0.86 },
+    basketMake: { 5: 0.95, 4: 0.8, 3: 0.6, 2: 0.4, 1: 0.25 },
+    throwCatch: { 5: 1, 4: 0.95, 3: 0.82, 2: 0.5, 1: 0.4 },
+    tennisPace: { 5: 0.46, 4: 0.6, 3: 0.82, 2: 1.1, 1: 1.2 },
+  },
+
   football: {
     startYard: 20,
     firstDownYards: 10,
@@ -244,9 +132,10 @@ export const GAME_CONFIG = {
 ============================================================================= */
 export const CAREER_CONFIG = {
   saveKey: 'retro-clash-career-v1',
-  startingCoins: 300,
-  rosterMax: 15,
-  startersPerSport: 3, // only starters' abilities are active in a match
+  startingCoins: 500,
+  rosterMax: 24,
+  freeStartersPerSport: { football: 2, basketball: 2, soccer: 2, tennis: 1 }, // the free squad leaves the rest of each lineup empty
+  coverageAgents: 10, // extra cheap free agents offered for positions you still need
   // value = transfer fee, salary = coins per week, weight = how often this rarity appears
   stars: {
     1: { value: 80, salary: 4, weight: 30 },
@@ -255,7 +144,7 @@ export const CAREER_CONFIG = {
     4: { value: 950, salary: 45, weight: 12 },
     5: { value: 2200, salary: 90, weight: 5 },
   },
-  rewards: { win: 220, draw: 120, loss: 70, perSeason: 30, tier5: 30, tier4: 12, playoffBerth: 250, playoffWin: 450, title: 1200 },
+  rewards: { win: 300, draw: 160, loss: 100, perSeason: 30, tier5: 25, tier4: 10, playoffBerth: 250, playoffWin: 450, title: 1200 },
   sellRatio: 0.6, // selling returns 60% of a player's value
   resignFeeRatio: 0.5, // re-signing an expiring player costs 50% of value
   offers: [
@@ -264,12 +153,12 @@ export const CAREER_CONFIG = {
     { id: 'big', label: 'BLOCKBUSTER', mult: 1.8, chance: 0.88 },
   ],
   morale: { start: 70, win: 6, draw: 1, loss: -5, starterBonus: 2, benchedPenalty: -3, unpaid: -12, newSigning: 10, unhappyBelow: 35 },
-  freeAgentsPerWeek: 6,
+  freeAgentsPerWeek: 10,
   rivalStarsMean: 1.8, // average star level of rival squads in season 1
   rivalStarsPerSeason: 0.35, // rivals' new signings get this much better every season
   rivalDevelopChance: 0.22, // per rival player, per off-season: chance to gain a star
   userDevelopChance: 0.2, // per happy (70+ morale) player of yours, per off-season
-  forfeitScores: { football: [0, 14], tennis: [0, 7], soccer: [0, 3] },
+  forfeitScores: { football: [0, 14], basketball: [0, 20], tennis: [0, 7], soccer: [0, 3] },
   rivals: [
     { name: 'LASER SHARKS', primary: '#00b4d8', secondary: '#ffd60a' },
     { name: 'BIT CRUSHERS', primary: '#ff006e', secondary: '#111111' },
@@ -292,7 +181,9 @@ export const ABILITIES = {
   ballhawk: { name: 'BALLHAWK', kind: 'RISK', mags: [0.05, 0.08, 0.12, 0.16, 0.22], desc: (m) => `+${pct(m)} chance to counter the rival's obvious answers` },
   clutch: { name: 'CLUTCH GENE', kind: 'RISK', mags: [0.2, 0.35, 0.5, 0.7, 0.9], desc: (m) => `${pct(m)} chance a T2 answer plays as T3` },
   composure: { name: 'COMPOSURE', kind: 'RISK', mags: [0.12, 0.2, 0.3, 0.42, 0.55], desc: (m) => `${pct(m)} chance a wrong answer is forgiven (plays as a safe T2)` },
-  power: { name: 'BULLDOZER', kind: 'STAT', sport: 'football', mags: [2, 3, 5, 7, 10], desc: (m) => `+${m} yards on SOLID & RARE plays` },
+  power: { name: 'BULLDOZER', kind: 'STAT', sport: 'football', mags: [0.12, 0.2, 0.28, 0.36, 0.48], desc: (m) => `${pct(m)} chance to break the first tackle each play` },
+  shooter: { name: 'SHARPSHOOTER', kind: 'STAT', sport: 'basketball', mags: [0.04, 0.07, 0.1, 0.14, 0.2], desc: (m) => `+${pct(m)} shot make chance` },
+  wheels: { name: 'WHEELS', kind: 'STAT', mags: [0.05, 0.09, 0.13, 0.18, 0.25], desc: (m) => `Runs ${pct(m)} faster on the field` },
   bigserve: { name: 'BIG SERVE', kind: 'STAT', sport: 'tennis', mags: [0.1, 0.18, 0.27, 0.36, 0.5], desc: (m) => `${pct(m)} chance a SOLID shot is a clean winner` },
   finisher: { name: 'FINISHER', kind: 'STAT', sport: 'soccer', mags: [0.06, 0.1, 0.15, 0.2, 0.28], desc: (m) => `Keeper save chance -${pct(m)}` },
   specialist: { name: 'BRAIN', kind: 'SPECIALIST', mags: [0.2, 0.35, 0.5, 0.7, 0.9], desc: (m, cat) => `${pct(m)} chance ${cat} answers jump +1 tier` },
@@ -792,6 +683,13 @@ function drawBall(ctx, kind, b, t) {
     ctx.fillRect(x - 1, y + 2, 3, 1);
     ctx.fillStyle = '#fff';
     ctx.fillRect(x - 1 + spin, y, 2 - spin, 1);
+  } else if (kind === 'basketball') {
+    ctx.fillStyle = '#e8711c';
+    ctx.fillRect(x - 1, y - 2, 3, 5);
+    ctx.fillRect(x - 2, y - 1, 5, 3);
+    ctx.fillStyle = '#5a2a00';
+    ctx.fillRect(x - 2, y, 5, 1);
+    ctx.fillRect(x, y - 2, 1, 5);
   } else if (kind === 'tennis') {
     ctx.fillStyle = '#d7ff3a';
     ctx.fillRect(x - 1, y - 1, 2, 2);
@@ -1318,6 +1216,1712 @@ export function buildIdle(scene, teams) {
 }
 
 /* =============================================================================
+   4b. ARCADE_ENGINE  (real-time matches)
+   -----------------------------------------------------------------------------
+   You move your player with WASD. Passing / shooting / throwing / hitting
+   FREEZES play and asks a trivia question; the answer's rarity decides how good
+   the action is. The CPU never waits: it acts instantly with a rolled answer.
+
+   Each sport module mutates one plain state object S:
+     setup(S)                      build players + ball, first restart
+     step(S, dt, input)            advance the sim; input[team] = {mx,my,action,secondary}
+     resolve(S, pending, outcome)  apply a human's answered question
+   Helpers on S: S.ask(team, kind, data) freezes for a question,
+   S.cpu(team) returns an instant CPU outcome, S.say(text) shows a banner.
+============================================================================= */
+const AC = () => GAME_CONFIG.arcade;
+const pdist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const TN_G = 320; // tennis ball gravity (px/s^2)
+
+function steer(p, tx, ty, speed, dt) {
+  const dx = tx - p.x;
+  const dy = ty - p.y;
+  const d = Math.hypot(dx, dy);
+  if (d < 0.75 || speed <= 0) {
+    p.vx = 0;
+    p.vy = 0;
+    return true;
+  }
+  const s = Math.min(speed * dt, d);
+  p.x += (dx / d) * s;
+  p.y += (dy / d) * s;
+  p.vx = (dx / d) * speed;
+  p.vy = (dy / d) * speed;
+  if (Math.abs(dx) > 0.4) p.face = Math.sign(dx);
+  return d <= speed * dt;
+}
+
+function humanMove(p, inp, speed, dt) {
+  let mx = inp.mx;
+  let my = inp.my;
+  const m = Math.hypot(mx, my);
+  if (m > 0.1) {
+    mx /= m;
+    my /= m;
+    p.x += mx * speed * dt;
+    p.y += my * speed * dt;
+    p.vx = mx * speed;
+    p.vy = my * speed;
+    if (Math.abs(mx) > 0.2) p.face = Math.sign(mx);
+  } else {
+    p.vx = 0;
+    p.vy = 0;
+  }
+}
+
+function makeAP(S, team, role, ref, x, y) {
+  const wheels = ref && ref.ability && ref.ability.key === 'wheels' && ref.morale >= CAREER_CONFIG.morale.unhappyBelow ? ref.ability.mag : 0;
+  return {
+    team,
+    role,
+    ref: ref || null,
+    name: ref ? ref.name : role,
+    skin: ref ? ref.skin : null,
+    hair: ref ? ref.hair : null,
+    x,
+    y,
+    vx: 0,
+    vy: 0,
+    face: team === 0 ? 1 : -1,
+    stun: 0,
+    speed: AC().runSpeed * (1 + wheels),
+    think: 0,
+    pose: null,
+    leg: 0,
+    lane: null,
+  };
+}
+
+function newBall() {
+  return { x: 160, y: 100, z: 0, vx: 0, vy: 0, vz: 0, owner: -1, cd: 0, kicker: -1, lastTeam: 0, safe: false, passTo: -1, shot: null, flight: null, held: 0, bounces: 0, lastHitter: 0, hitLock: false, prevSide: undefined };
+}
+
+export function createArcade(setup, hooks) {
+  const S = {
+    sport: setup.sport,
+    teams: setup.teams,
+    humans: setup.teams.map((t) => !t.isCPU),
+    rosters: setup.teams.map((t) => t.roster || {}),
+    mods: hooks.mods,
+    cpu: hooks.cpu,
+    cpuSkill: hooks.cpuSkill || 1,
+    players: [],
+    ball: newBall(),
+    control: [null, null],
+    aim: [null, null],
+    score: [0, 0],
+    clock: 0,
+    time: 0,
+    phase: 'intro',
+    timer: 0,
+    after: null,
+    banner: null,
+    pending: null,
+    sfx: [],
+    possTeam: 0,
+    celebrate: -1,
+  };
+  S.ask = (team, kind, data) => {
+    S.phase = 'question';
+    S.pending = { team, kind, ...data };
+  };
+  S.say = (text, color, size) => {
+    S.banner = { text, color: color || '#ffd23f', t: S.time, size: size || 16 };
+  };
+  S.sound = (n) => S.sfx.push(n);
+  S.dead = (sec, after) => {
+    S.phase = 'dead';
+    S.timer = sec;
+    S.after = after;
+  };
+  ARCADE_SPORTS[S.sport].setup(S);
+  S.phase = 'intro';
+  return S;
+}
+
+export function arcadeStep(S, dt, input) {
+  if (S.phase === 'question' || S.phase === 'intro' || S.phase === 'over') return;
+  S.time += dt;
+  if (S.phase === 'dead') {
+    S.timer -= dt;
+    if (S.timer <= 0) {
+      S.phase = 'live';
+      const f = S.after;
+      S.after = null;
+      if (f) f();
+    }
+    return;
+  }
+  ARCADE_SPORTS[S.sport].step(S, dt, input);
+}
+
+export function arcadeResolve(S, outcome) {
+  const pend = S.pending;
+  S.pending = null;
+  S.phase = 'live';
+  if (pend) ARCADE_SPORTS[S.sport].resolve(S, pend, outcome);
+}
+
+function arcadeEnd(S) {
+  S.phase = 'over';
+  S.banner = { text: 'FULL TIME', color: '#ffd23f', t: S.time, size: 18 };
+  S.sound('whistle');
+}
+
+function nearestIdx(S, team, x, y, filter) {
+  let best = -1;
+  let bd = 1e9;
+  S.players.forEach((p, i) => {
+    if (p.team !== team || (filter && !filter(p, i))) return;
+    const d = Math.hypot(p.x - x, p.y - y);
+    if (d < bd) {
+      bd = d;
+      best = i;
+    }
+  });
+  return best;
+}
+
+function nearestOppDist(S, q) {
+  let bd = 1e9;
+  S.players.forEach((o) => {
+    if (o.team !== q.team) bd = Math.min(bd, pdist(o, q));
+  });
+  return bd;
+}
+
+function giveBall(S, idx) {
+  const b = S.ball;
+  b.owner = idx;
+  b.vx = 0;
+  b.vy = 0;
+  b.vz = 0;
+  b.safe = false;
+  b.passTo = -1;
+  b.shot = null;
+  b.flight = null;
+  b.held = 0;
+  const p = S.players[idx];
+  S.possTeam = p.team;
+  if (S.humans[p.team] && p.role !== 'GK') S.control[p.team] = idx;
+}
+
+function autoSwitch(S, team, exclude) {
+  if (!S.humans[team]) return;
+  const b = S.ball;
+  const i = nearestIdx(S, team, b.x, b.y, (p, j) => p.role !== 'GK' && j !== exclude);
+  if (i >= 0) S.control[team] = i;
+}
+
+function otherHumansSwitch(S, gainedTeam) {
+  [0, 1].forEach((t) => {
+    if (S.humans[t] && t !== gainedTeam) autoSwitch(S, t);
+  });
+}
+
+function pickPassTarget(S, from, ax, ay) {
+  const p = S.players[from];
+  const m = Math.hypot(ax, ay);
+  const dx0 = m > 0.1 ? ax / m : p.team === 0 ? 1 : -1;
+  const dy0 = m > 0.1 ? ay / m : 0;
+  let best = -1;
+  let bs = -1e9;
+  S.players.forEach((q, i) => {
+    if (i === from || q.team !== p.team || q.role === 'GK') return;
+    const dx = q.x - p.x;
+    const dy = q.y - p.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const align = (dx * dx0 + dy * dy0) / d;
+    const open = Math.min(40, nearestOppDist(S, q));
+    const score = align * 70 + open * 0.6 - d * 0.1;
+    if (score > bs) {
+      bs = score;
+      best = i;
+    }
+  });
+  return best;
+}
+
+function kickBall(S, from, tx, ty, speed, opts = {}) {
+  const b = S.ball;
+  const p = S.players[from];
+  b.owner = -1;
+  b.kicker = from;
+  b.cd = 0.22;
+  b.x = p.x + p.face * 3;
+  b.y = p.y;
+  const dx = tx - b.x;
+  const dy = ty - b.y;
+  const d = Math.hypot(dx, dy) || 1;
+  b.vx = (dx / d) * speed;
+  b.vy = (dy / d) * speed;
+  b.vz = opts.vz || 0;
+  b.z = opts.z || 0;
+  b.safe = !!opts.safe;
+  b.passTo = opts.to != null ? opts.to : -1;
+  b.shot = opts.shot || null;
+  b.lastTeam = p.team;
+}
+
+function tryPickup(S, radius, zMax, gkRadius) {
+  const b = S.ball;
+  if (b.owner >= 0) return null;
+  let best = -1;
+  let bd = 1e9;
+  S.players.forEach((p, i) => {
+    if (p.stun > 0) return;
+    if (i === b.kicker && b.cd > 0) return;
+    if (b.safe && p.team !== b.lastTeam) return;
+    const r = p.role === 'GK' ? gkRadius : radius;
+    const d = Math.hypot(p.x - b.x, p.y - b.y);
+    if (d < r && b.z < (p.role === 'GK' ? zMax + 10 : zMax) && d < bd) {
+      bd = d;
+      best = i;
+    }
+  });
+  if (best < 0) return null;
+  giveBall(S, best);
+  otherHumansSwitch(S, S.players[best].team);
+  return best;
+}
+
+function attemptSteal(S, idx, chance, word) {
+  const b = S.ball;
+  const p = S.players[idx];
+  if (b.owner < 0) return;
+  const c = S.players[b.owner];
+  if (c.team === p.team || pdist(c, p) > AC().tackleRange) return;
+  if (Math.random() < chance) {
+    c.stun = 0.5;
+    giveBall(S, idx);
+    otherHumansSwitch(S, p.team);
+    S.say(word, '#06d6a0', 12);
+    S.sound('tackle');
+  } else if (S.humans[p.team]) {
+    p.stun = AC().stunSeconds;
+    S.say('MISSED!', '#ef476f', 10);
+  }
+}
+
+const tierWord = (tier) => ({ 5: 'PERFECT', 4: 'GREAT', 3: 'GOOD', 2: 'WEAK', 1: 'WEAK' })[tier] || 'BAD';
+
+/* --- SOCCER (5-a-side, top-down) ------------------------------------------- */
+const SOC = { x0: 14, x1: 306, y0: 26, y1: 172, gTop: 84, gBot: 114 };
+const SOC_MID = 99;
+const SOC_HOME = { GK: [0.015, 0.5], DEF: [0.2, 0.5], MID: [0.38, 0.28], WING: [0.4, 0.74], ST: [0.5, 0.5] };
+const SOC_BOX = { x0: SOC.x0 + 2, x1: SOC.x1 - 2, y0: SOC.y0 + 2, y1: SOC.y1 - 2 };
+
+function socSpot(S, p, kickoff) {
+  const [fx, fy] = SOC_HOME[p.role];
+  if (p.role === 'GK') return { x: p.team === 0 ? SOC.x0 + 5 : SOC.x1 - 5, y: clamp(S.ball.y, SOC.gTop + 3, SOC.gBot - 3) };
+  let f;
+  if (kickoff) f = Math.min(0.46, fx * 0.9);
+  else {
+    const attacking = S.possTeam === p.team;
+    const prog = p.team === 0 ? (S.ball.x - SOC.x0) / (SOC.x1 - SOC.x0) : (SOC.x1 - S.ball.x) / (SOC.x1 - SOC.x0);
+    f = clamp(fx + (attacking ? 0.16 : -0.06) + (prog - 0.5) * 0.35, 0.06, 0.93);
+  }
+  const x = p.team === 0 ? lerp(SOC.x0, SOC.x1, f) : lerp(SOC.x1, SOC.x0, f);
+  const baseY = lerp(SOC.y0 + 10, SOC.y1 - 10, fy);
+  return { x, y: kickoff ? baseY : lerp(baseY, S.ball.y, 0.25) };
+}
+
+function socKickoff(S, team) {
+  S.possTeam = team;
+  S.celebrate = -1;
+  S.players.forEach((p) => {
+    const sp = socSpot(S, p, true);
+    p.x = sp.x;
+    p.y = sp.y;
+    p.stun = 0;
+    p.vx = 0;
+    p.vy = 0;
+    p.pose = null;
+    p.lane = null;
+  });
+  const st = S.players.findIndex((p) => p.team === team && p.role === 'ST');
+  S.players[st].x = 160 - (team === 0 ? 5 : -5);
+  S.players[st].y = SOC_MID;
+  S.ball = newBall();
+  giveBall(S, st);
+  otherHumansSwitch(S, team);
+  S.say('KICK OFF', '#fff', 12);
+  S.dead(1.0, null);
+}
+
+function socGoal(S, team) {
+  S.score[team] += 1;
+  S.celebrate = team;
+  const b = S.ball;
+  b.shot = null;
+  b.owner = -1;
+  b.vx *= 0.15;
+  b.vy *= 0.15;
+  S.say('GOAL!', '#ffd23f', 22);
+  S.sound('cheer');
+  S.dead(2.0, () => socKickoff(S, 1 - team));
+}
+
+function socPass(S, from, to, o) {
+  const p = S.players[from];
+  const q = S.players[to];
+  const team = p.team;
+  const tier = o.kind === 'answer' ? o.tier : 0;
+  if (o.counter) {
+    const opp = nearestIdx(S, 1 - team, (p.x + q.x) / 2, (p.y + q.y) / 2, (x) => x.role !== 'GK');
+    if (opp >= 0) {
+      giveBall(S, opp);
+      otherHumansSwitch(S, 1 - team);
+      S.say('INTERCEPTED!', '#ef476f');
+      S.sound('buzzer');
+      return;
+    }
+  }
+  let tx = q.x + q.vx * 0.3;
+  let ty = q.y + q.vy * 0.3;
+  if (tier === 0) {
+    tx += rand(-45, 45);
+    ty += rand(-35, 35);
+    S.say('MISPLACED PASS', '#ef476f', 11);
+  }
+  const d = Math.hypot(tx - p.x, ty - p.y);
+  const speed = tier >= 3 ? Math.max(AC().passSpeed[tier], d * 1.35) : AC().passSpeed[tier];
+  kickBall(S, from, tx, ty, speed, { to: tier > 0 ? to : -1, safe: tier >= 4 });
+  S.sound('kick');
+  if (S.humans[team]) {
+    if (tier > 0) S.control[team] = to;
+    else autoSwitch(S, team);
+  }
+  if (tier >= 4) S.say(`${tierWord(tier)} PASS!`, '#06d6a0', 11);
+}
+
+function socShoot(S, from, o) {
+  const p = S.players[from];
+  const team = p.team;
+  const keeper = S.players.findIndex((x) => x.team !== team && x.role === 'GK');
+  const tier = o.kind === 'answer' ? o.tier : 0;
+  const lineX = team === 0 ? SOC.x1 : SOC.x0;
+  const dGoal = Math.abs(p.x - lineX);
+  if (o.counter) {
+    giveBall(S, keeper);
+    S.counterLaunch = true;
+    S.say('SMOTHERED! COUNTER!', '#ef476f', 12);
+    S.sound('tackle');
+    otherHumansSwitch(S, 1 - team);
+    return;
+  }
+  const side = Math.random() < 0.5 ? -1 : 1;
+  let result;
+  let ty;
+  if (tier === 0) {
+    result = 'miss';
+    ty = SOC_MID + side * rand(22, 32);
+    S.say(o.kind === 'timeout' ? 'SHANKED IT!' : 'WIDE!', '#ef476f');
+  } else {
+    const M = S.mods[team];
+    const save = clamp(AC().soccerSave[tier] + Math.max(0, (dGoal - 60) / 160) - (M.finisher || 0), 0, 0.97);
+    result = Math.random() < save ? 'save' : 'goal';
+    ty = SOC_MID + side * ({ 5: 13, 4: 11, 3: 7, 2: 4, 1: 2 }[tier] || 0);
+  }
+  kickBall(S, from, team === 0 ? SOC.x1 + 10 : SOC.x0 - 10, ty, 215 + tier * 14, { shot: { result, keeper, team, ty }, vz: tier >= 4 ? 45 : 12 });
+  S.sound('kick');
+}
+
+function socKeeper(S, i, dt) {
+  const p = S.players[i];
+  const b = S.ball;
+  const gx = p.team === 0 ? SOC.x0 + 5 : SOC.x1 - 5;
+  if (b.owner === i) {
+    b.held += dt;
+    p.x = gx;
+    if (b.held > (S.counterLaunch ? 0.3 : 0.9)) {
+      const counter = S.counterLaunch;
+      const wantRole = counter ? 'ST' : Math.random() < 0.5 ? 'MID' : 'DEF';
+      const st = S.players.findIndex((x) => x.team === p.team && x.role === wantRole);
+      const q = S.players[st];
+      kickBall(S, i, q.x + (p.team === 0 ? 20 : -20), q.y, counter ? 240 : 170, { to: st, safe: counter, vz: 60 });
+      if (counter) S.say('COUNTER-ATTACK!', '#ef476f', 12);
+      S.counterLaunch = false;
+      if (S.humans[p.team]) S.control[p.team] = st;
+      S.sound('kick');
+    }
+    return;
+  }
+  if (b.shot && b.shot.keeper === i) {
+    const ty = b.shot.result === 'save' ? b.shot.ty : clamp(b.shot.ty + (b.shot.ty > SOC_MID ? -16 : 16), SOC.gTop, SOC.gBot);
+    steer(p, gx, ty, 130, dt);
+    p.pose = Math.abs(p.y - ty) > 2 ? 'dive' : null;
+    return;
+  }
+  p.pose = null;
+  if (b.owner < 0 && Math.abs(b.x - gx) < 34 && Math.abs(b.y - SOC_MID) < 30) {
+    steer(p, b.x, b.y, p.speed, dt);
+    return;
+  }
+  steer(p, gx, clamp(b.y, SOC.gTop + 2, SOC.gBot - 2), p.speed * 0.9, dt);
+}
+
+function socCarrierAI(S, i, dt) {
+  const p = S.players[i];
+  const b = S.ball;
+  const team = p.team;
+  const gx = team === 0 ? SOC.x1 : SOC.x0;
+  if (p.lane == null) p.lane = rand(-22, 22);
+  steer(p, gx, SOC_MID + p.lane, p.speed * 0.9 * S.cpuSkill, dt);
+  p.x = clamp(p.x, SOC_BOX.x0, SOC_BOX.x1);
+  p.y = clamp(p.y, SOC_BOX.y0, SOC_BOX.y1);
+  p.think -= dt;
+  if (p.think > 0) return;
+  p.think = 0.3;
+  const dGoal = Math.abs(p.x - gx);
+  const press = nearestOppDist(S, p);
+  if ((dGoal < 78 && (press > 16 || Math.random() < 0.3)) || b.held > 6.5) {
+    socShoot(S, i, S.cpu(team));
+    return;
+  }
+  if (press < 13 && Math.random() < 0.65) {
+    const t = pickPassTarget(S, i, team === 0 ? 1 : -1, 0);
+    if (t >= 0) socPass(S, i, t, S.cpu(team));
+  }
+}
+
+function socAI(S, i, dt, chasers) {
+  const p = S.players[i];
+  const b = S.ball;
+  if (p.stun > 0) {
+    p.stun -= dt;
+    p.vx = 0;
+    p.vy = 0;
+    return;
+  }
+  if (S.celebrate >= 0) return;
+  if (p.role === 'GK') return socKeeper(S, i, dt);
+  if (b.owner === i) {
+    if (!S.humans[p.team]) socCarrierAI(S, i, dt);
+    return;
+  }
+  const sp = p.speed * (S.humans[p.team] ? 0.92 : S.cpuSkill);
+  if (b.owner < 0 && b.passTo === i) {
+    steer(p, b.x + b.vx * 0.12, b.y + b.vy * 0.12, sp, dt);
+    return;
+  }
+  if (chasers[p.team] === i) {
+    const tgt = b.owner >= 0 ? S.players[b.owner] : b;
+    steer(p, tgt.x, tgt.y, sp, dt);
+    if (b.owner >= 0 && S.players[b.owner].team !== p.team && pdist(p, S.players[b.owner]) < 7) {
+      const rate = S.humans[p.team] ? 0.35 : AC().cpuStealPerSec * S.cpuSkill;
+      if (Math.random() < rate * dt) attemptSteal(S, i, 1, 'STOLEN!');
+    }
+    return;
+  }
+  const s = socSpot(S, p);
+  steer(p, s.x, s.y, sp * 0.8, dt);
+}
+
+function socHuman(S, team, inp, dt) {
+  const idx = S.control[team];
+  if (idx == null) return;
+  const p = S.players[idx];
+  const b = S.ball;
+  if (p.stun > 0) {
+    p.stun -= dt;
+    return;
+  }
+  humanMove(p, inp, p.speed * (b.owner === idx ? AC().carrySpeedMult : 1), dt);
+  p.x = clamp(p.x, SOC_BOX.x0, SOC_BOX.x1);
+  p.y = clamp(p.y, SOC_BOX.y0, SOC_BOX.y1);
+  S.aim[team] = b.owner === idx ? pickPassTarget(S, idx, inp.mx, inp.my) : null;
+  if (inp.action) {
+    if (b.owner === idx) {
+      if (S.aim[team] >= 0) S.ask(team, 'pass', { from: idx, to: S.aim[team] });
+    } else attemptSteal(S, idx, AC().humanTackleChance, 'TACKLED!');
+  } else if (inp.secondary) {
+    if (b.owner === idx) S.ask(team, 'shoot', { from: idx });
+    else autoSwitch(S, team, idx);
+  }
+}
+
+function socBall(S, dt) {
+  const b = S.ball;
+  if (b.cd > 0) b.cd -= dt;
+  if (b.owner >= 0) {
+    const p = S.players[b.owner];
+    b.x = p.x + p.face * 3;
+    b.y = p.y + 1;
+    b.z = 0;
+    b.held += dt;
+    return;
+  }
+  b.x += b.vx * dt;
+  b.y += b.vy * dt;
+  b.z += b.vz * dt;
+  b.vz -= 320 * dt;
+  if (b.z <= 0) {
+    b.z = 0;
+    b.vz = b.vz < -40 ? -b.vz * 0.35 : 0;
+  }
+  if (!b.shot && b.z <= 0) {
+    const k = Math.exp(-1.1 * dt);
+    b.vx *= k;
+    b.vy *= k;
+  }
+  if (b.shot) {
+    const sh = b.shot;
+    const keeper = S.players[sh.keeper];
+    if (sh.result === 'save' && Math.abs(b.x - keeper.x) < 6) {
+      keeper.y = b.y;
+      giveBall(S, sh.keeper);
+      keeper.pose = null;
+      otherHumansSwitch(S, keeper.team);
+      S.say('SAVED!', '#ef476f');
+      S.sound('tackle');
+      return;
+    }
+    const lineX = sh.team === 0 ? SOC.x1 : SOC.x0;
+    if (sh.team === 0 ? b.x >= lineX : b.x <= lineX) {
+      if (sh.result === 'goal') return socGoal(S, sh.team);
+      b.shot = null;
+      giveBall(S, sh.keeper);
+      otherHumansSwitch(S, keeper.team);
+      S.say('GOAL KICK', '#fff', 10);
+    }
+    return;
+  }
+  if (tryPickup(S, 6, 6, 9) != null) return;
+  const outX = b.x < SOC.x0 - 1 || b.x > SOC.x1 + 1;
+  const outY = b.y < SOC.y0 - 1 || b.y > SOC.y1 + 1;
+  if (outX && b.y > SOC.gTop && b.y < SOC.gBot) return socGoal(S, b.x > SOC.x1 ? 0 : 1);
+  if (outX || outY) {
+    const team = 1 - b.lastTeam;
+    const bx = clamp(b.x, SOC.x0 + 4, SOC.x1 - 4);
+    const by = clamp(b.y, SOC.y0 + 3, SOC.y1 - 3);
+    const i = outX ? S.players.findIndex((p) => p.team === team && p.role === 'GK') : nearestIdx(S, team, bx, by, (p) => p.role !== 'GK');
+    const p = S.players[i];
+    if (!outX) {
+      p.x = bx;
+      p.y = by;
+    }
+    b.vx = 0;
+    b.vy = 0;
+    giveBall(S, i);
+    otherHumansSwitch(S, team);
+    S.say(outX ? 'GOAL KICK' : 'THROW-IN', '#fff', 10);
+    S.dead(0.6, null);
+  }
+}
+
+const SoccerArcade = {
+  roles: ['GK', 'DEF', 'MID', 'WING', 'ST'],
+  setup(S) {
+    S.clock = AC().soccerSeconds;
+    [0, 1].forEach((team) => this.roles.forEach((role) => S.players.push(makeAP(S, team, role, S.rosters[team][role], 160, SOC_MID))));
+    socKickoff(S, 0);
+  },
+  step(S, dt, input) {
+    S.clock -= dt;
+    if (S.clock <= 0) {
+      S.clock = 0;
+      arcadeEnd(S);
+      return;
+    }
+    [0, 1].forEach((team) => {
+      if (!S.humans[team]) return;
+      if (S.control[team] == null) autoSwitch(S, team);
+      socHuman(S, team, input[team], dt);
+    });
+    if (S.phase !== 'live') return;
+    const b = S.ball;
+    const ctrl = new Set(S.control.filter((c) => c != null));
+    const chasers = [0, 1].map((team) => {
+      if (b.owner >= 0 && S.players[b.owner].team === team) return -1;
+      return nearestIdx(S, team, b.x, b.y, (p, i) => p.role !== 'GK' && !ctrl.has(i));
+    });
+    S.players.forEach((p, i) => {
+      if (!ctrl.has(i)) socAI(S, i, dt, chasers);
+    });
+    socBall(S, dt);
+  },
+  resolve(S, pend, o) {
+    if (pend.kind === 'pass') socPass(S, pend.from, pend.to, o);
+    else socShoot(S, pend.from, o);
+  },
+};
+
+/* --- BASKETBALL (5-on-5 full court) ---------------------------------------- */
+const BB = { x0: 14, x1: 306, y0: 36, y1: 170, three: 68 };
+BB.hoops = [
+  { x: 30, y: 103 },
+  { x: 290, y: 103 },
+];
+const BB_BOX = { x0: BB.x0 + 2, x1: BB.x1 - 2, y0: BB.y0 + 2, y1: BB.y1 - 2 };
+const BB_OFF = { PG: [0.6, 0.5], SG: [0.7, 0.18], SF: [0.72, 0.84], PF: [0.84, 0.3], C: [0.86, 0.68] };
+const bbAttackHoop = (team) => BB.hoops[team === 0 ? 1 : 0];
+const bbOwnHoop = (team) => BB.hoops[team === 0 ? 0 : 1];
+
+function bbSpot(S, p) {
+  if (S.possTeam === p.team) {
+    const [fx, fy] = BB_OFF[p.role];
+    return { x: p.team === 0 ? lerp(BB.x0, BB.x1, fx) : lerp(BB.x1, BB.x0, fx), y: lerp(BB.y0 + 8, BB.y1 - 8, fy) };
+  }
+  const m = S.players.find((q) => q.team !== p.team && q.role === p.role) || S.players[0];
+  const h = bbOwnHoop(p.team);
+  return { x: lerp(m.x, h.x, 0.28), y: lerp(m.y, h.y, 0.28) };
+}
+
+function bbInbound(S, team) {
+  const pg = S.players.findIndex((p) => p.team === team && p.role === 'PG');
+  const h = bbOwnHoop(team);
+  const p = S.players[pg];
+  p.x = h.x + (team === 0 ? 12 : -12);
+  p.y = h.y + 22;
+  S.ball = newBall();
+  giveBall(S, pg);
+  otherHumansSwitch(S, team);
+}
+
+function bbPass(S, from, to, o) {
+  const p = S.players[from];
+  const q = S.players[to];
+  const team = p.team;
+  const tier = o.kind === 'answer' ? o.tier : 0;
+  if (o.counter) {
+    const opp = nearestIdx(S, 1 - team, (p.x + q.x) / 2, (p.y + q.y) / 2);
+    giveBall(S, opp);
+    otherHumansSwitch(S, 1 - team);
+    S.say('STOLEN!', '#ef476f');
+    S.sound('buzzer');
+    return;
+  }
+  let tx = q.x + q.vx * 0.25;
+  let ty = q.y + q.vy * 0.25;
+  if (tier === 0) {
+    tx += rand(-40, 40);
+    ty += rand(-30, 30);
+    S.say('BAD PASS', '#ef476f', 11);
+  }
+  const d = Math.hypot(tx - p.x, ty - p.y);
+  kickBall(S, from, tx, ty, tier >= 3 ? Math.max(AC().passSpeed[tier], d * 1.5) : AC().passSpeed[tier], { to: tier > 0 ? to : -1, safe: tier >= 4, z: 8 });
+  S.sound('throw');
+  if (S.humans[team]) {
+    if (tier > 0) S.control[team] = to;
+    else autoSwitch(S, team);
+  }
+}
+
+function bbShoot(S, from, o) {
+  const p = S.players[from];
+  const team = p.team;
+  const h = bbAttackHoop(team);
+  const d = Math.hypot(p.x - h.x, p.y - h.y);
+  const tier = o.kind === 'answer' ? o.tier : 0;
+  if (o.counter) {
+    const opp = nearestIdx(S, 1 - team, p.x, p.y);
+    giveBall(S, opp);
+    otherHumansSwitch(S, 1 - team);
+    S.say('BLOCKED!', '#ef476f');
+    S.sound('smash');
+    return;
+  }
+  const M = S.mods[team];
+  const make = tier === 0 ? 0 : clamp(AC().basketMake[tier] - Math.max(0, d - 40) * 0.0025 + (d < 18 ? 0.15 : 0) + (M.shooter || 0), 0.02, 0.98);
+  const made = Math.random() < make;
+  const b = S.ball;
+  b.owner = -1;
+  b.kicker = from;
+  b.lastTeam = team;
+  b.flight = { t: 0, T: 0.55 + d / 400, x0: p.x, y0: p.y, x1: h.x, y1: h.y, made, points: d > BB.three ? 3 : 2, team, dunk: d < 18 };
+  if (tier === 0) S.say(o.kind === 'timeout' ? 'SHOT CLOCK!' : 'AIRBALL!', '#ef476f', 12);
+  S.sound('throw');
+}
+
+function bbCarrierAI(S, i, dt) {
+  const p = S.players[i];
+  const b = S.ball;
+  const h = bbAttackHoop(p.team);
+  if (p.lane == null) p.lane = rand(-1.1, 1.1);
+  const tx = h.x + (p.team === 0 ? -1 : 1) * Math.cos(p.lane) * 46;
+  const ty = h.y + Math.sin(p.lane) * 46;
+  steer(p, tx, ty, p.speed * 0.9 * S.cpuSkill, dt);
+  p.think -= dt;
+  if (p.think > 0) return;
+  p.think = 0.35;
+  const d = Math.hypot(p.x - h.x, p.y - h.y);
+  const press = nearestOppDist(S, p);
+  if ((d < 75 && (press > 12 || Math.random() < 0.35)) || b.held > 7) {
+    bbShoot(S, i, S.cpu(p.team));
+    return;
+  }
+  if (press < 10 && Math.random() < 0.5) {
+    const t = pickPassTarget(S, i, p.team === 0 ? 1 : -1, 0);
+    if (t >= 0) bbPass(S, i, t, S.cpu(p.team));
+  }
+}
+
+function bbBall(S, dt) {
+  const b = S.ball;
+  if (b.cd > 0) b.cd -= dt;
+  if (b.owner >= 0) {
+    const p = S.players[b.owner];
+    b.x = p.x + p.face * 4;
+    b.y = p.y + 1;
+    b.z = 2 + Math.abs(Math.sin(S.time * 11)) * 5;
+    b.held += dt;
+    return;
+  }
+  if (b.flight) {
+    const f = b.flight;
+    f.t += dt;
+    const u = Math.min(1, f.t / f.T);
+    b.x = lerp(f.x0, f.x1, u);
+    b.y = lerp(f.y0, f.y1, u);
+    b.z = 10 + 4 * 34 * u * (1 - u) + 8 * u;
+    if (u >= 1) {
+      b.flight = null;
+      if (f.made) {
+        S.score[f.team] += f.points;
+        S.say(f.dunk ? 'SLAM DUNK!' : f.points === 3 ? 'THREE!' : 'BUCKET!', '#ffd23f', 18);
+        S.sound('cheer');
+        S.dead(1.1, () => bbInbound(S, 1 - f.team));
+      } else {
+        const ang = rand(0, Math.PI * 2);
+        b.vx = Math.cos(ang) * 55;
+        b.vy = Math.sin(ang) * 55;
+        b.vz = 50;
+        b.z = 20;
+        b.kicker = -1;
+        b.cd = 0.15;
+        b.safe = false;
+        S.say('MISS!', '#fff', 10);
+      }
+    }
+    return;
+  }
+  b.x += b.vx * dt;
+  b.y += b.vy * dt;
+  b.z += b.vz * dt;
+  b.vz -= 260 * dt;
+  if (b.z <= 0) {
+    b.z = 0;
+    b.vz = b.vz < -30 ? -b.vz * 0.5 : 0;
+    const k = Math.exp(-1.5 * dt);
+    b.vx *= k;
+    b.vy *= k;
+  }
+  if (tryPickup(S, 7, 22, 7) != null) return;
+  if (b.x < BB.x0 - 1 || b.x > BB.x1 + 1 || b.y < BB.y0 - 1 || b.y > BB.y1 + 1) {
+    const team = 1 - b.lastTeam;
+    const bx = clamp(b.x, BB.x0 + 3, BB.x1 - 3);
+    const by = clamp(b.y, BB.y0 + 3, BB.y1 - 3);
+    const i = nearestIdx(S, team, bx, by);
+    S.players[i].x = bx;
+    S.players[i].y = by;
+    b.vx = 0;
+    b.vy = 0;
+    giveBall(S, i);
+    otherHumansSwitch(S, team);
+    S.say('OUT OF BOUNDS', '#fff', 10);
+    S.dead(0.6, null);
+  }
+}
+
+const BasketballArcade = {
+  roles: ['PG', 'SG', 'SF', 'PF', 'C'],
+  setup(S) {
+    S.clock = AC().basketballSeconds;
+    [0, 1].forEach((team) => this.roles.forEach((role) => S.players.push(makeAP(S, team, role, S.rosters[team][role], 160, 103))));
+    S.possTeam = 0;
+    S.players.forEach((p) => {
+      const s = bbSpot(S, p);
+      p.x = p.team === 0 ? Math.min(s.x, 150) : Math.max(s.x, 170);
+      p.y = s.y;
+    });
+    const pg = S.players.findIndex((p) => p.team === 0 && p.role === 'PG');
+    S.players[pg].x = 150;
+    S.players[pg].y = 103;
+    giveBall(S, pg);
+    otherHumansSwitch(S, 0);
+    S.say('TIP OFF', '#fff', 12);
+    S.dead(1.0, null);
+  },
+  step(S, dt, input) {
+    S.clock -= dt;
+    if (S.clock <= 0) {
+      S.clock = 0;
+      arcadeEnd(S);
+      return;
+    }
+    const b = S.ball;
+    [0, 1].forEach((team) => {
+      if (!S.humans[team]) return;
+      if (S.control[team] == null) autoSwitch(S, team);
+      const idx = S.control[team];
+      const p = S.players[idx];
+      const inp = input[team];
+      if (p.stun > 0) {
+        p.stun -= dt;
+        return;
+      }
+      humanMove(p, inp, p.speed * (b.owner === idx ? AC().carrySpeedMult : 1), dt);
+      p.x = clamp(p.x, BB_BOX.x0, BB_BOX.x1);
+      p.y = clamp(p.y, BB_BOX.y0, BB_BOX.y1);
+      S.aim[team] = b.owner === idx ? pickPassTarget(S, idx, inp.mx, inp.my) : null;
+      if (inp.action) {
+        if (b.owner === idx) {
+          if (S.aim[team] >= 0) S.ask(team, 'pass', { from: idx, to: S.aim[team] });
+        } else attemptSteal(S, idx, AC().humanStealChance, 'STEAL!');
+      } else if (inp.secondary) {
+        if (b.owner === idx) S.ask(team, 'shoot', { from: idx });
+        else autoSwitch(S, team, idx);
+      }
+    });
+    if (S.phase !== 'live') return;
+    const ctrl = new Set(S.control.filter((c) => c != null));
+    const chasers = [0, 1].map((team) => (b.owner >= 0 && S.players[b.owner].team === team ? -1 : nearestIdx(S, team, b.x, b.y, (p, i) => !ctrl.has(i))));
+    S.players.forEach((p, i) => {
+      if (ctrl.has(i)) return;
+      if (p.stun > 0) {
+        p.stun -= dt;
+        return;
+      }
+      if (b.owner === i) {
+        if (!S.humans[p.team]) bbCarrierAI(S, i, dt);
+        return;
+      }
+      const sp = p.speed * (S.humans[p.team] ? 0.92 : S.cpuSkill);
+      if (b.owner < 0 && b.passTo === i) return steer(p, b.x, b.y, sp, dt);
+      if (chasers[p.team] === i && !b.flight) {
+        const tgt = b.owner >= 0 ? S.players[b.owner] : b;
+        steer(p, tgt.x, tgt.y, sp, dt);
+        if (b.owner >= 0 && pdist(p, S.players[b.owner]) < 7) {
+          const rate = S.humans[p.team] ? 0.3 : AC().cpuStealPerSec * 0.8 * S.cpuSkill;
+          if (Math.random() < rate * dt) attemptSteal(S, i, 1, 'STOLEN!');
+        }
+        return;
+      }
+      const s = bbSpot(S, p);
+      steer(p, s.x, s.y, sp * 0.85, dt);
+    });
+    bbBall(S, dt);
+  },
+  resolve(S, pend, o) {
+    if (pend.kind === 'pass') bbPass(S, pend.from, pend.to, o);
+    else bbShoot(S, pend.from, o);
+  },
+};
+
+/* --- FOOTBALL (5-on-5, one play at a time) ---------------------------------- */
+const FB_SLOTS = { QB: 'S', RB: 'LB', WR: 'CB1', TE: 'CB2', OL: 'DL' }; // offense role -> matching defender slot
+
+function fbSetupPlay(S) {
+  const f = S.f;
+  const off = f.offense;
+  const def = 1 - off;
+  const x0 = FY(f.yard);
+  S.players = [];
+  const add = (team, rosterRole, slot, x, y) => {
+    const p = makeAP(S, team, slot, S.rosters[team][rosterRole], x, y);
+    p.face = team === off ? 1 : -1;
+    S.players.push(p);
+    return S.players.length - 1;
+  };
+  S.fb = {
+    qb: add(off, 'QB', 'QB', x0 - 12, 110),
+    rb: add(off, 'RB', 'RB', x0 - 22, 118),
+    wr: add(off, 'WR', 'WR', x0 - 3, 62),
+    te: add(off, 'TE', 'TE', x0 - 3, 148),
+    ol: add(off, 'OL', 'OL', x0 - 3, 110),
+    dl: add(def, 'OL', 'DL', x0 + 5, 110),
+    lb: add(def, 'RB', 'LB', x0 + 18, 112),
+    cb1: add(def, 'WR', 'CB1', x0 + 10, 64),
+    cb2: add(def, 'TE', 'CB2', x0 + 10, 146),
+    s: add(def, 'QB', 'S', x0 + 46, 108),
+    state: 'pre',
+    lineX: x0,
+    t: 0,
+    thrown: false,
+    broke: false,
+    qbHold: rand(1.1, 1.9) / S.cpuSkill,
+  };
+  S.ball = newBall();
+  fbGive(S, S.fb.qb);
+  S.control = [null, null];
+  if (S.humans[off]) S.control[off] = S.fb.qb;
+  if (S.humans[def]) S.control[def] = S.fb.lb;
+  S.possTeam = off;
+  S.celebrate = -1;
+  if (S.humans[off]) S.say('PRESS SPACE TO HIKE', '#fff', 10);
+}
+
+function fbGive(S, idx) {
+  const b = S.ball;
+  b.owner = idx;
+  b.flight = null;
+  const p = S.players[idx];
+  if (S.humans[p.team]) S.control[p.team] = idx;
+}
+
+function fbRoute(S, p, sp, dt) {
+  const lx = S.fb.lineX;
+  const routes = {
+    WR: [
+      [lx + 60, 62],
+      [lx + 100, 92],
+      [lx + 170, 96],
+    ],
+    TE: [
+      [lx + 28, 148],
+      [lx + 44, 128],
+      [lx + 100, 124],
+    ],
+    RB: [
+      [lx - 6, 140],
+      [lx + 24, 152],
+      [lx + 80, 150],
+    ],
+  }[p.role];
+  if (!routes) {
+    p.vx = 0;
+    p.vy = 0;
+    return;
+  }
+  const [tx, ty] = routes[Math.min(p.leg, routes.length - 1)];
+  if (steer(p, Math.min(tx, FY(106)), ty, sp, dt) && p.leg < routes.length - 1) p.leg += 1;
+}
+
+function fbOpenness(S, r) {
+  return nearestOppDist(S, r);
+}
+
+function fbPickReceiver(S, from, inp) {
+  const F = S.fb;
+  const qb = S.players[from];
+  const m = Math.hypot(inp.mx, inp.my);
+  let best = null;
+  let bs = -1e9;
+  [F.wr, F.te, F.rb].forEach((i) => {
+    const r = S.players[i];
+    const dx = r.x - qb.x;
+    const dy = r.y - qb.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const align = m > 0.1 ? (dx * inp.mx + dy * inp.my) / (d * m) : 0;
+    const score = align * 80 + Math.min(30, fbOpenness(S, r)) + dx * 0.05;
+    if (score > bs) {
+      bs = score;
+      best = i;
+    }
+  });
+  return best;
+}
+
+function fbThrow(S, qbIdx, recvIdx, o) {
+  const F = S.fb;
+  const qb = S.players[qbIdx];
+  const r = S.players[recvIdx];
+  const team = qb.team;
+  F.thrown = true;
+  if (o.kind === 'timeout') {
+    S.say('SACKED! TOO SLOW', '#ef476f', 11);
+    fbWhistle(S, 'sack');
+    return;
+  }
+  const tier = o.kind === 'answer' ? o.tier : 0;
+  const d = pdist(qb, r);
+  const T = clamp(d / 165, 0.35, 1.1);
+  let tx = r.x + r.vx * T;
+  let ty = clamp(r.y + r.vy * T, FIELD_TOP + 4, FIELD_BOT - 4);
+  let result;
+  let interceptor = -1;
+  if (o.counter) {
+    result = 'int';
+    interceptor = nearestIdx(S, 1 - team, tx, ty);
+  } else if (tier === 0) {
+    result = 'inc';
+    tx += rand(-30, 30);
+    ty = clamp(ty + rand(-25, 25), FIELD_TOP, FIELD_BOT);
+  } else {
+    let pc = AC().throwCatch[tier];
+    let cover = 1e9;
+    S.players.forEach((q) => {
+      if (q.team !== team) cover = Math.min(cover, Math.hypot(q.x - tx, q.y - ty));
+    });
+    if (cover < 12 && tier <= 3) pc *= 0.7;
+    result = Math.random() < pc ? 'catch' : 'inc';
+  }
+  const b = S.ball;
+  b.owner = -1;
+  b.x = qb.x + qb.face * 3;
+  b.y = qb.y;
+  b.flight = { t: 0, T, x0: b.x, y0: b.y, tx, ty, result, recv: recvIdx, interceptor, team, tier };
+  S.sound('throw');
+  if (S.humans[1 - team]) {
+    const i = nearestIdx(S, 1 - team, tx, ty);
+    if (i >= 0) S.control[1 - team] = i;
+  }
+}
+
+function fbWhistle(S, kind) {
+  const F = S.fb;
+  const f = S.f;
+  const b = S.ball;
+  if (F.state !== 'live') return;
+  F.state = 'dead';
+  const off = f.offense;
+  const def = 1 - off;
+  const round = f.drives[off] - 1;
+  const add = (team, pts) => {
+    f.scores[team] += pts;
+    f.byRound[team][round] = (f.byRound[team][round] || 0) + pts;
+  };
+  const carrier = b.owner >= 0 ? S.players[b.owner] : null;
+  const x = carrier ? carrier.x : S.players[F.qb].x;
+  const yardAt = Math.round((x - 20) / 2.8);
+  let msg;
+  let color = '#fff';
+  let endDrive = false;
+  if (kind === 'td') {
+    add(off, GAME_CONFIG.football.touchdownPoints);
+    msg = 'TOUCHDOWN!';
+    color = '#ffd23f';
+    endDrive = true;
+    S.celebrate = off;
+    S.sound('cheer');
+  } else if (kind === 'pick6') {
+    add(def, GAME_CONFIG.football.pickSixPoints);
+    msg = 'PICK SIX!';
+    color = '#ef476f';
+    endDrive = true;
+    S.celebrate = def;
+    S.sound('cheer');
+  } else if (carrier && carrier.team !== off) {
+    msg = 'TURNOVER!';
+    color = '#ef476f';
+    endDrive = true;
+    S.sound('buzzer');
+  } else if (kind === 'inc') {
+    f.down += 1;
+    msg = 'INCOMPLETE';
+    S.sound('buzzer');
+  } else if (yardAt <= 0) {
+    add(def, GAME_CONFIG.football.safetyPoints);
+    msg = 'SAFETY!';
+    color = '#ef476f';
+    endDrive = true;
+    S.sound('buzzer');
+  } else {
+    const gain = yardAt - f.yard;
+    f.yard = clamp(yardAt, 1, 99);
+    if (gain >= f.toGo) {
+      f.down = 1;
+      f.toGo = Math.min(GAME_CONFIG.football.firstDownYards, 100 - f.yard);
+      msg = `+${gain} YDS · FIRST DOWN!`;
+      color = '#06d6a0';
+    } else {
+      f.down += 1;
+      f.toGo -= gain;
+      msg = `${kind === 'sack' ? 'SACKED! ' : ''}${gain >= 0 ? '+' : ''}${gain} YDS`;
+      color = gain > 0 ? '#fff' : '#ef476f';
+    }
+    S.sound('tackle');
+  }
+  if (!endDrive && f.down > 4) {
+    endDrive = true;
+    msg += ' · TURNOVER ON DOWNS';
+    color = '#ef476f';
+  }
+  S.say(msg, color, msg.length > 14 ? 10 : 16);
+  S.score = f.scores;
+  S.dead(1.7, () => {
+    if (endDrive) footballNextDrive(f);
+    if (f.over) {
+      arcadeEnd(S);
+      return;
+    }
+    fbSetupPlay(S);
+  });
+}
+
+function fbAI(S, i, dt) {
+  const p = S.players[i];
+  const F = S.fb;
+  const b = S.ball;
+  const off = S.f.offense;
+  if (p.stun > 0) {
+    p.stun -= dt;
+    p.vx = 0;
+    p.vy = 0;
+    return;
+  }
+  const sp = p.speed * (S.humans[p.team] ? 0.9 : S.cpuSkill);
+  if (b.owner === i) {
+    if (S.humans[p.team]) return;
+    const preQB = i === F.qb && !F.thrown && p.x < F.lineX + 2;
+    if (preQB) {
+      steer(p, F.lineX - 26, p.y, sp * 0.6, dt);
+      F.qbHold -= dt;
+      const dl = S.players[F.dl];
+      if (F.qbHold <= 0 || pdist(dl, p) < 13) {
+        let best = F.wr;
+        let bo = -1;
+        [F.wr, F.te, F.rb].forEach((r) => {
+          const o = fbOpenness(S, S.players[r]) + (S.players[r].x - p.x) * 0.08;
+          if (o > bo) {
+            bo = o;
+            best = r;
+          }
+        });
+        fbThrow(S, i, best, S.cpu(p.team));
+      }
+      return;
+    }
+    const dir = p.team === off ? 1 : -1;
+    const goalX = dir > 0 ? FY(103) : FY(-3);
+    const threat = S.players[nearestIdx(S, 1 - p.team, p.x, p.y)];
+    const dy = p.y - threat.y || 1;
+    steer(p, goalX, clamp(p.y + Math.sign(dy) * 22, FIELD_TOP + 6, FIELD_BOT - 6), sp * 0.95, dt);
+    return;
+  }
+  const carrier = b.owner >= 0 ? S.players[b.owner] : null;
+  if (b.flight) {
+    const fl = b.flight;
+    if (p.team === off) {
+      if (i === fl.recv) steer(p, fl.tx, fl.ty, sp, dt);
+      else fbRoute(S, p, sp * 0.8, dt);
+      return;
+    }
+    if (p.role === 'DL') return steer(p, S.players[F.qb].x, S.players[F.qb].y, sp * 0.6, dt);
+    return steer(p, fl.tx, fl.ty, sp * 0.95, dt);
+  }
+  const preThrow = carrier && b.owner === F.qb && !F.thrown && carrier.x < F.lineX + 2;
+  if (preThrow) {
+    const qb = S.players[F.qb];
+    if (p.team === off) {
+      if (p.role === 'OL') {
+        const dl = S.players[F.dl];
+        steer(p, lerp(dl.x, qb.x, 0.35), lerp(dl.y, qb.y, 0.35), sp * 0.85, dt);
+      } else fbRoute(S, p, sp, dt);
+      return;
+    }
+    if (p.role === 'DL') {
+      const blocked = pdist(S.players[F.ol], p) < 8;
+      return steer(p, qb.x, qb.y, sp * (blocked ? 0.3 : 0.85), dt);
+    }
+    if (p.role === 'LB') return steer(p, F.lineX + 14, qb.y, sp * 0.7, dt);
+    if (p.role === 'CB1') return steer(p, S.players[F.wr].x + 5, S.players[F.wr].y + 3, sp * 0.97, dt);
+    if (p.role === 'CB2') return steer(p, S.players[F.te].x + 5, S.players[F.te].y - 3, sp * 0.95, dt);
+    return steer(p, Math.max(F.lineX + 50, S.players[F.wr].x + 18), lerp(108, b.y, 0.4), sp * 0.8, dt);
+  }
+  if (carrier) {
+    if (p.team === carrier.team) {
+      const q = S.players[nearestIdx(S, 1 - p.team, carrier.x, carrier.y)];
+      return steer(p, lerp(q.x, carrier.x, 0.35), lerp(q.y, carrier.y, 0.35), sp * 0.85, dt);
+    }
+    return steer(p, carrier.x + carrier.vx * 0.25, carrier.y + carrier.vy * 0.25, sp, dt);
+  }
+}
+
+function fbBall(S, dt) {
+  const b = S.ball;
+  const F = S.fb;
+  if (b.owner >= 0) {
+    const p = S.players[b.owner];
+    b.x = p.x + p.face * 3;
+    b.y = p.y + 0.5;
+    b.z = 6;
+    return;
+  }
+  if (!b.flight) return;
+  const fl = b.flight;
+  fl.t += dt;
+  const u = Math.min(1, fl.t / fl.T);
+  b.x = lerp(fl.x0, fl.tx, u);
+  b.y = lerp(fl.y0, fl.ty, u);
+  b.z = 6 + (10 + Math.hypot(fl.tx - fl.x0, fl.ty - fl.y0) * 0.08) * 4 * u * (1 - u);
+  if (u < 1) return;
+  b.flight = null;
+  if (fl.result === 'int' && fl.interceptor >= 0) {
+    const q = S.players[fl.interceptor];
+    q.x = b.x;
+    q.y = b.y;
+    fbGive(S, fl.interceptor);
+    S.possTeam = q.team;
+    S.say('INTERCEPTED!', '#ef476f', 14);
+    S.sound('buzzer');
+    if (S.humans[1 - q.team]) autoSwitch(S, 1 - q.team);
+    return;
+  }
+  const r = S.players[fl.recv];
+  if (fl.result === 'catch' && Math.hypot(r.x - b.x, r.y - b.y) < 16) {
+    r.x = b.x;
+    r.y = b.y;
+    fbGive(S, fl.recv);
+    S.say(fl.tier >= 4 ? `${tierWord(fl.tier)} CATCH!` : 'CAUGHT!', '#06d6a0', 12);
+    if (S.humans[1 - r.team]) autoSwitch(S, 1 - r.team);
+    return;
+  }
+  fbWhistle(S, 'inc');
+}
+
+function fbContact(S) {
+  const F = S.fb;
+  const b = S.ball;
+  if (F.state !== 'live' || b.owner < 0) return;
+  const c = S.players[b.owner];
+  const off = S.f.offense;
+  if (c.team === off && c.x >= FY(100)) return fbWhistle(S, 'td');
+  if (c.team !== off && c.x <= FY(0)) return fbWhistle(S, 'pick6');
+  if (c.y < FIELD_TOP + 1 || c.y > FIELD_BOT - 1) return fbWhistle(S, 'oob');
+  for (const q of S.players) {
+    if (q.team === c.team || q.stun > 0 || pdist(q, c) > 6) continue;
+    const M = S.mods[c.team];
+    if (!F.broke && M.power && Math.random() < M.power) {
+      F.broke = true;
+      q.stun = 0.8;
+      S.say('BROKE A TACKLE!', '#06d6a0', 11);
+      continue;
+    }
+    const preQB = b.owner === F.qb && !F.thrown && c.x < F.lineX + 2;
+    return fbWhistle(S, preQB ? 'sack' : 'tackle');
+  }
+}
+
+const FootballArcade = {
+  roles: ['QB', 'RB', 'WR', 'TE', 'OL'],
+  setup(S) {
+    S.f = FootballEngine.init();
+    S.f.totalDrives = AC().footballDrives;
+    S.score = S.f.scores;
+    fbSetupPlay(S);
+  },
+  step(S, dt, input) {
+    const F = S.fb;
+    const f = S.f;
+    const off = f.offense;
+    F.t += dt;
+    if (F.state === 'pre') {
+      if ((S.humans[off] && input[off].action) || (!S.humans[off] && F.t > 1.0)) {
+        F.state = 'live';
+        F.t = 0;
+        S.sound('whistle');
+        S.say('HIKE!', '#fff', 12);
+      }
+      return;
+    }
+    if (F.state !== 'live') return;
+    [0, 1].forEach((team) => {
+      if (!S.humans[team]) return;
+      const idx = S.control[team];
+      if (idx == null) return;
+      const p = S.players[idx];
+      const inp = input[team];
+      if (p.stun > 0) {
+        p.stun -= dt;
+        return;
+      }
+      humanMove(p, inp, p.speed, dt);
+      p.x = clamp(p.x, 2, 318);
+      p.y = clamp(p.y, FIELD_TOP + 2, FIELD_BOT - 2);
+      const isQB = idx === F.qb && S.ball.owner === idx && !F.thrown && p.x < F.lineX + 2;
+      if (team === off && isQB) {
+        S.aim[team] = fbPickReceiver(S, idx, inp);
+        if (inp.action && S.aim[team] != null) S.ask(team, 'throw', { from: idx, to: S.aim[team] });
+        else if (inp.secondary && pdist(p, S.players[F.rb]) < 28) {
+          fbGive(S, F.rb);
+          F.thrown = true;
+          S.say('HANDOFF', '#fff', 10);
+        }
+      } else {
+        S.aim[team] = null;
+        if (inp.secondary && S.ball.owner !== idx) {
+          const i = nearestIdx(S, team, S.ball.x, S.ball.y, (q, j) => j !== idx);
+          if (i >= 0) S.control[team] = i;
+        }
+      }
+    });
+    if (S.phase !== 'live') return;
+    S.players.forEach((p, i) => {
+      if (!S.control.includes(i)) fbAI(S, i, dt);
+    });
+    fbBall(S, dt);
+    fbContact(S);
+    if (F.state === 'live' && F.t > 15) fbWhistle(S, 'tackle');
+  },
+  resolve(S, pend, o) {
+    fbThrow(S, pend.from, pend.to, o);
+  },
+};
+
+/* --- TENNIS (tiebreak) --------------------------------------------------------- */
+function tnServe(S) {
+  const t = S.t;
+  const P = S.players;
+  const flip = t.pointNo % 2 ? -1 : 1;
+  P[0].x = 30;
+  P[0].y = 110 + 16 * flip;
+  P[1].x = 290;
+  P[1].y = 110 - 16 * flip;
+  P.forEach((p) => {
+    p.vx = 0;
+    p.vy = 0;
+    p.pose = null;
+  });
+  S.ball = newBall();
+  S.ball.owner = t.server;
+  t.serving = true;
+  t.waitT = 0;
+  t.oppSmash = false;
+  if (S.humans[t.server]) S.say('PRESS SPACE TO SERVE', '#fff', 10);
+}
+
+function tnPoint(S, winner, word) {
+  const t = S.t;
+  t.points[winner] += 1;
+  S.score = t.points;
+  S.say(word, S.humans[winner] ? '#06d6a0' : '#ef476f', 14);
+  S.sound(S.humans[winner] ? 'cheer' : 'buzzer');
+  const c = GAME_CONFIG.tennis;
+  S.ball.vx = 0;
+  S.ball.vy = 0;
+  S.ball.vz = 0;
+  if (t.points[winner] >= c.pointsToWin && t.points[winner] - t.points[1 - winner] >= c.winBy) {
+    S.dead(1.6, () => arcadeEnd(S));
+    return;
+  }
+  t.pointNo += 1;
+  t.server = tennisServerFor(t.pointNo);
+  S.dead(1.4, () => tnServe(S));
+}
+
+function tnHit(S, team, o, serve) {
+  const t = S.t;
+  const b = S.ball;
+  const p = S.players[team];
+  const opp = S.players[1 - team];
+  t.serving = false;
+  let tier = o.kind === 'answer' ? o.tier : 0;
+  const M = S.mods[team];
+  if (tier === 3 && M.bigserve && Math.random() < M.bigserve) tier = 5;
+  if (t.oppSmash && tier > 0) {
+    tier = 5;
+    S.say('SMASH!', S.humans[team] ? '#06d6a0' : '#ef476f', 14);
+  }
+  t.oppSmash = false;
+  const dir = team === 0 ? 1 : -1;
+  b.owner = -1;
+  b.x = p.x + dir * 4;
+  b.y = p.y;
+  b.z = 10;
+  b.bounces = 0;
+  b.lastHitter = team;
+  b.hitLock = false;
+  b.prevSide = team;
+  t.lastTier = tier;
+  p.pose = 'armsUp';
+  p.poseT = 0.25;
+  S.sound(tier >= 5 ? 'smash' : 'hit');
+  let tx;
+  let ty;
+  let T;
+  if (tier === 0) {
+    if (Math.random() < 0.5) {
+      tx = COURT.net - dir * 8;
+      ty = p.y;
+      T = 0.4;
+    } else {
+      tx = team === 0 ? COURT.x1 + 20 : COURT.x0 - 20;
+      ty = p.y + rand(-20, 20);
+      T = 0.75;
+    }
+    S.say(o.kind === 'timeout' ? 'TOO SLOW!' : serve ? 'DOUBLE FAULT!' : 'UNFORCED ERROR!', '#ef476f', 11);
+  } else if (o.counter) {
+    tx = team === 0 ? COURT.net + 40 : COURT.net - 40;
+    ty = 110;
+    T = 1.3;
+    t.oppSmash = true;
+    S.say('SITTER... UH OH', '#ef476f', 10);
+  } else {
+    const far = team === 0 ? COURT.x1 : COURT.x0;
+    if (serve) tx = team === 0 ? rand(172, 214) : rand(106, 148);
+    else tx = tier >= 4 ? far - dir * rand(6, 14) : far - dir * rand(28, 60);
+    if (tier === 5) ty = opp.y < 110 ? COURT.y1 - 5 : COURT.y0 + 5;
+    else if (tier === 4) ty = Math.random() < 0.5 ? COURT.y0 + 8 : COURT.y1 - 8;
+    else if (tier === 3) ty = rand(COURT.y0 + 14, COURT.y1 - 14);
+    else ty = lerp(opp.y, 110, 0.5) + rand(-8, 8);
+    T = AC().tennisPace[tier] * (serve ? 0.95 : 1);
+    if (tier === 5) S.say(serve ? 'ACE!' : 'WINNER!', S.humans[team] ? '#ffd23f' : '#ef476f', 16);
+  }
+  b.vx = (tx - b.x) / T;
+  b.vy = (ty - b.y) / T;
+  b.vz = (0 - b.z + 0.5 * TN_G * T * T) / T;
+}
+
+function tnCpuMove(S, team, dt) {
+  const b = S.ball;
+  const p = S.players[team];
+  let tx = team === 0 ? 30 : 290;
+  let ty = 110;
+  if (b.owner < 0 && b.lastHitter !== team) {
+    if (b.bounces >= 1) {
+      tx = b.x + b.vx * 0.15;
+      ty = b.y + b.vy * 0.15;
+    } else {
+      const disc = b.vz * b.vz + 2 * TN_G * b.z;
+      const tl = (b.vz + Math.sqrt(Math.max(0, disc))) / TN_G;
+      tx = b.x + b.vx * tl + b.vx * 0.8 * 0.2;
+      ty = b.y + b.vy * tl + b.vy * 0.8 * 0.2;
+    }
+  }
+  tx = team === 0 ? clamp(tx, 4, COURT.net - 6) : clamp(tx, COURT.net + 6, 316);
+  ty = clamp(ty, COURT.y0 - 14, COURT.y1 + 14);
+  steer(p, tx, ty, p.speed * 0.92 * S.cpuSkill, dt);
+}
+
+const TennisArcade = {
+  roles: ['SINGLES'],
+  setup(S) {
+    S.t = { points: [0, 0], pointNo: 0, server: 0, serving: true, waitT: 0, oppSmash: false, lastTier: 0 };
+    S.players = [makeAP(S, 0, 'SINGLES', S.rosters[0].SINGLES, 30, 110), makeAP(S, 1, 'SINGLES', S.rosters[1].SINGLES, 290, 110)];
+    S.players.forEach((p) => (p.speed *= AC().tennisSpeedMult));
+    S.control = [S.humans[0] ? 0 : null, S.humans[1] ? 1 : null];
+    S.score = S.t.points;
+    tnServe(S);
+  },
+  step(S, dt, input) {
+    const t = S.t;
+    const b = S.ball;
+    const P = S.players;
+    P.forEach((p) => {
+      if (p.poseT > 0) {
+        p.poseT -= dt;
+        if (p.poseT <= 0) p.pose = null;
+      }
+    });
+    if (t.serving && b.owner >= 0) {
+      const sv = b.owner;
+      if (S.humans[sv]) {
+        if (input[sv].action) S.ask(sv, 'serve', { from: sv });
+      } else {
+        t.waitT += dt;
+        if (t.waitT > 0.7) tnHit(S, sv, S.cpu(sv), true);
+      }
+      if (b.owner >= 0) {
+        b.x = P[sv].x + P[sv].face * 3;
+        b.y = P[sv].y;
+        b.z = 10 + Math.abs(Math.sin(S.time * 4)) * 6;
+      }
+      [0, 1].forEach((team) => {
+        if (S.humans[team] && team !== sv) {
+          humanMove(P[team], input[team], P[team].speed, dt);
+          P[team].x = team === 0 ? clamp(P[team].x, 4, COURT.net - 6) : clamp(P[team].x, COURT.net + 6, 316);
+          P[team].y = clamp(P[team].y, COURT.y0 - 14, COURT.y1 + 14);
+        }
+      });
+      return;
+    }
+    [0, 1].forEach((team) => {
+      if (S.humans[team]) {
+        humanMove(P[team], input[team], P[team].speed, dt);
+        P[team].x = team === 0 ? clamp(P[team].x, 4, COURT.net - 6) : clamp(P[team].x, COURT.net + 6, 316);
+        P[team].y = clamp(P[team].y, COURT.y0 - 14, COURT.y1 + 14);
+      } else tnCpuMove(S, team, dt);
+    });
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.z += b.vz * dt;
+    b.vz -= TN_G * dt;
+    const side = b.x < COURT.net ? 0 : 1;
+    if (b.prevSide !== undefined && side !== b.prevSide) {
+      if (b.z < 5) return tnPoint(S, 1 - b.lastHitter, 'NET!');
+      b.prevSide = side;
+    }
+    if (b.z <= 0 && b.vz < 0) {
+      b.z = 0;
+      b.bounces += 1;
+      const inCourt = b.x > COURT.x0 - 1 && b.x < COURT.x1 + 1 && b.y > COURT.y0 - 1 && b.y < COURT.y1 + 1;
+      const onOpp = b.lastHitter === 0 ? b.x > COURT.net : b.x < COURT.net;
+      if (b.bounces === 1 && (!inCourt || !onOpp)) return tnPoint(S, 1 - b.lastHitter, 'OUT!');
+      if (b.bounces >= 2) return tnPoint(S, b.lastHitter, t.lastTier >= 5 ? 'WINNER!' : 'POINT!');
+      b.vz = -b.vz * 0.62;
+      b.vx *= 0.8;
+      b.vy *= 0.8;
+    }
+    if (b.x < -12 || b.x > 332 || b.y < -12 || b.y > 192) return tnPoint(S, b.bounces >= 1 ? b.lastHitter : 1 - b.lastHitter, b.bounces >= 1 ? 'WINNER!' : 'OUT!');
+    const recv = 1 - b.lastHitter;
+    const rp = P[recv];
+    if (!b.hitLock && b.bounces >= 1 && b.z < 18 && Math.hypot(rp.x - b.x, rp.y - b.y) < 12) {
+      b.hitLock = true;
+      if (S.humans[recv]) S.ask(recv, 'hit', { from: recv });
+      else tnHit(S, recv, S.cpu(recv), false);
+    }
+  },
+  resolve(S, pend, o) {
+    tnHit(S, pend.team, o, pend.kind === 'serve');
+  },
+};
+
+const ARCADE_SPORTS = { football: FootballArcade, basketball: BasketballArcade, soccer: SoccerArcade, tennis: TennisArcade };
+
+/* --- Arcade rendering ------------------------------------------------------------ */
+function bgSoccerPitch(ctx, teams, clock, cheer) {
+  drawCrowd(ctx, teams, 0, 22, clock, cheer);
+  for (let x = 0, i = 0; x < CW; x += 20, i++) {
+    ctx.fillStyle = i % 2 ? '#3a8c3f' : '#348238';
+    ctx.fillRect(x, 22, 20, CH - 22);
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  const r = (x0, y0, w, h) => {
+    ctx.fillRect(x0, y0, w, 1);
+    ctx.fillRect(x0, y0 + h, w + 1, 1);
+    ctx.fillRect(x0, y0, 1, h);
+    ctx.fillRect(x0 + w, y0, 1, h);
+  };
+  r(SOC.x0, SOC.y0, SOC.x1 - SOC.x0, SOC.y1 - SOC.y0);
+  ctx.fillRect(160, SOC.y0, 1, SOC.y1 - SOC.y0);
+  for (let a = 0; a < Math.PI * 2; a += 0.08) ctx.fillRect(Math.round(160 + Math.cos(a) * 20), Math.round(SOC_MID + Math.sin(a) * 20), 1, 1);
+  r(SOC.x0, SOC_MID - 34, 40, 68);
+  r(SOC.x1 - 40, SOC_MID - 34, 40, 68);
+  r(SOC.x0, SOC_MID - 16, 14, 32);
+  r(SOC.x1 - 14, SOC_MID - 16, 14, 32);
+  [SOC.x0, SOC.x1].forEach((gx, side) => {
+    const dx = side ? 1 : -9;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(gx + dx, SOC.gTop, 8, SOC.gBot - SOC.gTop);
+    ctx.fillStyle = 'rgba(230,230,230,0.55)';
+    for (let y = SOC.gTop; y <= SOC.gBot; y += 3) ctx.fillRect(gx + dx, y, 8, 1);
+    for (let x = 0; x <= 8; x += 3) ctx.fillRect(gx + dx + x, SOC.gTop, 1, SOC.gBot - SOC.gTop);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(gx - 1, SOC.gTop - 1, 3, 3);
+    ctx.fillRect(gx - 1, SOC.gBot - 1, 3, 3);
+  });
+  drawPixelText(ctx, shortName(teams[0].name), 60, 30, 6, inkFor(teams[0].primary), 'center', 1);
+  drawPixelText(ctx, shortName(teams[1].name), 260, 30, 6, inkFor(teams[1].primary), 'center', 1);
+}
+
+function bgBasketball(ctx, teams, clock, cheer) {
+  drawCrowd(ctx, teams, 0, 30, clock, cheer);
+  for (let y = 30, i = 0; y < CH; y += 4, i++) {
+    ctx.fillStyle = i % 2 ? '#c98d52' : '#c4874b';
+    ctx.fillRect(0, y, CW, 4);
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  for (let x = 0; x < CW; x += 24) ctx.fillRect(x, 30, 1, CH - 30);
+  // painted keys in team colors
+  [0, 1].forEach((side) => {
+    const h = BB.hoops[side];
+    const tm = teams[side];
+    ctx.fillStyle = tm.primary;
+    ctx.globalAlpha = 0.55;
+    ctx.fillRect(side ? h.x - 44 : BB.x0, h.y - 16, side ? BB.x1 - (h.x - 44) : h.x + 44 - BB.x0, 32);
+    ctx.globalAlpha = 1;
+  });
+  ctx.fillStyle = '#fff';
+  const r = (x0, y0, w, h) => {
+    ctx.fillRect(x0, y0, w, 1);
+    ctx.fillRect(x0, y0 + h, w + 1, 1);
+    ctx.fillRect(x0, y0, 1, h);
+    ctx.fillRect(x0 + w, y0, 1, h);
+  };
+  r(BB.x0, BB.y0, BB.x1 - BB.x0, BB.y1 - BB.y0);
+  ctx.fillRect(160, BB.y0, 1, BB.y1 - BB.y0);
+  for (let a = 0; a < Math.PI * 2; a += 0.08) ctx.fillRect(Math.round(160 + Math.cos(a) * 16), Math.round(103 + Math.sin(a) * 16), 1, 1);
+  BB.hoops.forEach((h, side) => {
+    const s = side ? -1 : 1;
+    for (let a = -1.25; a <= 1.25; a += 0.03) ctx.fillRect(Math.round(h.x + s * Math.cos(a) * BB.three), Math.round(h.y + Math.sin(a) * BB.three), 1, 1);
+    r(side ? h.x - 44 : BB.x0, h.y - 16, 44 + (side ? BB.x1 - h.x : h.x - BB.x0), 32);
+    ctx.fillStyle = '#e8e8e8';
+    ctx.fillRect(h.x - s * 6, h.y - 10, 2, 20);
+    ctx.fillStyle = '#ff7b00';
+    for (let a = 0; a < Math.PI * 2; a += 0.4) ctx.fillRect(Math.round(h.x + Math.cos(a) * 4), Math.round(h.y + Math.sin(a) * 4), 1, 1);
+    ctx.fillStyle = '#fff';
+  });
+  drawPixelText(ctx, shortName(teams[0].name), 80, 38, 6, inkFor(teams[0].primary), 'center', 1);
+  drawPixelText(ctx, shortName(teams[1].name), 240, 38, 6, inkFor(teams[1].primary), 'center', 1);
+}
+
+const ARCADE_BALL = { football: 'football', basketball: 'basketball', soccer: 'soccer', tennis: 'tennis' };
+
+export function arcadeRender(ctx, S, clock) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, CW, CH);
+  const bn = S.banner;
+  const cheer = bn && S.time - bn.t < 2.2 && /GOAL|TOUCHDOWN|THREE|DUNK|PICK|WINNER|ACE|BUCKET/.test(bn.text) ? 1 - (S.time - bn.t) / 2.2 : 0;
+  const teams = S.teams;
+  if (S.sport === 'football') bgFootball(ctx, { offense: S.f.offense, yard: S.f.yard, toGo: S.f.toGo }, teams, clock, cheer);
+  else if (S.sport === 'tennis') bgTennis(ctx, {}, teams, clock, cheer);
+  else if (S.sport === 'basketball') bgBasketball(ctx, teams, clock, cheer);
+  else bgSoccerPitch(ctx, teams, clock, cheer);
+
+  const head = S.sport === 'football' ? 'helmet' : 'hair';
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  S.players.forEach((p) => ctx.fillRect(Math.round(p.x - 4), Math.round(p.y) - 1, 8, 2));
+  const b = S.ball;
+  const showBall = !(S.sport === 'tennis' && b.owner < 0 && S.phase === 'dead' && b.vx === 0);
+  if (showBall) {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(Math.round(b.x - 1), Math.round(b.y), 3, 1);
+  }
+  // aim ring under the current pass/throw target
+  [0, 1].forEach((team) => {
+    const a = S.aim[team];
+    if (a == null || a < 0 || !S.players[a] || S.phase !== 'live') return;
+    const q = S.players[a];
+    ctx.fillStyle = team === 0 ? '#ffd23f' : '#4cc9f0';
+    for (let k = 0; k < 12; k++) {
+      const ang = (k / 12) * Math.PI * 2 + clock * 3;
+      ctx.fillRect(Math.round(q.x + Math.cos(ang) * 7), Math.round(q.y + Math.sin(ang) * 3), 1, 1);
+    }
+  });
+  const items = S.players.map((p, i) => ({
+    y: p.y,
+    draw: () => {
+      const team = teams[p.team];
+      const gk = p.role === 'GK';
+      const moving = Math.hypot(p.vx, p.vy) > 5;
+      let pose = p.pose || (p.stun > 0 ? 'down' : moving ? (Math.floor(clock * 10 + i) % 2 ? 'run1' : 'run2') : 'stand');
+      if (S.celebrate === p.team && S.phase === 'dead') pose = 'armsUp';
+      const spr = getSprite(pose, head, gk ? team.secondary : team.primary, gk ? team.primary : team.secondary, p.face < 0, p.skin, p.hair);
+      ctx.drawImage(spr, Math.round(p.x - spr.width / 2), Math.round(p.y - spr.height));
+      if (S.sport === 'tennis') drawRacket(ctx, { x: p.x, y: p.y, face: p.face, pose });
+    },
+  }));
+  if (showBall) items.push({ y: b.y + 0.1, draw: () => drawBall(ctx, ARCADE_BALL[S.sport], b, clock) });
+  items.sort((p, q) => p.y - q.y).forEach((it) => it.draw());
+  // controlled-player markers + name tags
+  [0, 1].forEach((team) => {
+    const c = S.control[team];
+    if (c == null || !S.players[c] || S.phase === 'over') return;
+    const p = S.players[c];
+    const col = team === 0 ? '#ffd23f' : '#4cc9f0';
+    const bob = Math.round(Math.sin(clock * 6));
+    const hx = Math.round(p.x);
+    const hy = Math.round(p.y - 15 + bob);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(hx - 3, hy - 1, 7, 4);
+    ctx.fillStyle = col;
+    ctx.fillRect(hx - 2, hy, 5, 1);
+    ctx.fillRect(hx - 1, hy + 1, 3, 1);
+    ctx.fillRect(hx, hy + 2, 1, 1);
+    const tag = (p.name || '').split(' ').slice(-1)[0].toUpperCase().slice(0, 9);
+    drawPixelText(ctx, tag, hx, hy - 5, 5, col, 'center', 1);
+  });
+  if (bn && S.time - bn.t < 1.8) {
+    const dt = S.time - bn.t;
+    const pop = Math.min(1, dt / 0.12);
+    const size = fitFont(ctx, bn.text, bn.size || 16, 300);
+    ctx.save();
+    ctx.translate(CW / 2, 96);
+    ctx.scale(0.5 + 0.5 * pop, 0.5 + 0.5 * pop);
+    drawPixelText(ctx, bn.text, 0, 0, size, bn.color);
+    ctx.restore();
+  }
+  if (S.phase === 'question') {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(0, 0, CW, CH);
+  }
+}
+
+/* =============================================================================
    5. GAME_ENGINE  (pure logic: no React, no canvas)
 ============================================================================= */
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -1592,227 +3196,6 @@ const FootballEngine = {
 };
 
 const tennisServerFor = (pointNo) => (pointNo === 0 ? 0 : Math.floor((pointNo + 1) / 2) % 2);
-const newTennisStats = () => ({ aces: 0, winners: 0, smashes: 0, errors: 0 });
-
-const TennisEngine = {
-  id: 'tennis',
-  label: 'TENNIS TIEBREAK',
-  icon: '🎾',
-  head: 'hair',
-  blurb: 'First to 7, win by 2. Every answer is a shot. Ultra-rares are aces, rares paint the corners, obvious answers get SMASHED back.',
-  init() {
-    return { points: [0, 0], pointNo: 0, server: 0, rally: { hitter: 0, shots: 0, pressure: false }, ys: [110, 110], ts: [newTennisStats(), newTennisStats()], over: false };
-  },
-  currentActor: (s) => s.rally.hitter,
-  isOver: (s) => s.over,
-  scores: (s) => s.points,
-  resolve(s, o, actor, teams, mods) {
-    const c = GAME_CONFIG.tennis;
-    const M = mods ? mods[actor] : null;
-    const triggers = [];
-    const n = clone(s);
-    const opp = 1 - actor;
-    const r = s.rally;
-    const serve = r.shots === 0;
-    let result;
-    let winner = null;
-    let banner = null;
-    let errorType = 'net';
-    let stretched = false;
-    if (o.kind !== 'answer') {
-      result = 'error';
-      winner = opp;
-      errorType = Math.random() < 0.5 ? 'net' : 'out';
-      banner = serve ? 'DOUBLE FAULT!' : o.kind === 'timeout' ? 'TOO SLOW!' : 'UNFORCED ERROR!';
-      n.ts[actor].errors++;
-    } else if (r.pressure && o.tier < c.pressureMinTier) {
-      result = 'error';
-      winner = opp;
-      stretched = true;
-      banner = 'OVERPOWERED!';
-      n.ts[opp].winners++;
-    } else if (o.counter) {
-      result = 'smash';
-      winner = opp;
-      banner = 'SMASH WINNER!';
-      n.ts[opp].smashes++;
-    } else if (o.tier === 5) {
-      result = serve ? 'ace' : 'winner';
-      winner = actor;
-      banner = serve ? 'ACE!' : 'WINNER!';
-      n.ts[actor][serve ? 'aces' : 'winners']++;
-    } else if (o.tier === 4 && !(Math.random() < c.deepRetrieveChance && r.shots + 1 < c.maxRallyShots)) {
-      result = 'winner';
-      winner = actor;
-      banner = 'CORNER WINNER!';
-      n.ts[actor].winners++;
-    } else if (o.tier === 4) {
-      result = 'retrieved';
-      banner = 'WHAT A GET!';
-    } else if (o.tier === 3 && M && M.bigserve > 0 && Math.random() < M.bigserve) {
-      result = serve ? 'ace' : 'winner';
-      winner = actor;
-      banner = serve ? 'ACE!' : 'BIG HIT WINNER!';
-      n.ts[actor][serve ? 'aces' : 'winners']++;
-      triggers.push(`BIG SERVE (${M.src.bigserve}): SOLID shot turned into a winner`);
-    } else if (r.shots + 1 >= c.maxRallyShots && o.tier >= 3) {
-      result = 'winner';
-      winner = actor;
-      banner = 'RALLY WINNER!';
-      n.ts[actor].winners++;
-    } else {
-      result = 'continue';
-    }
-    const toY = rand(78, 142);
-    const anim = { sport: 'tennis', hitter: actor, fromY: s.ys[actor], recvY: s.ys[opp], toY, result, banner, serve, errorType, stretched };
-    if (winner === null) {
-      n.rally = { hitter: opp, shots: r.shots + 1, pressure: result === 'retrieved' };
-      n.ys[opp] = toY;
-      const shot = o.tier >= 3 ? 'returns it' : 'pops up a weak return';
-      return {
-        state: n,
-        anim,
-        quick: true,
-        toast: result === 'retrieved' ? `${teams[opp].name} chases it down! Needs a SOLID+ reply...` : `${teams[actor].name} ${shot}: "${o.matchedText}"`,
-        tone: o.tier >= 3 ? 'good' : 'meh',
-        triggers,
-      };
-    }
-    n.points[winner] += 1;
-    if (n.points[winner] >= c.pointsToWin && n.points[winner] - n.points[1 - winner] >= c.winBy) n.over = true;
-    n.pointNo += 1;
-    n.server = tennisServerFor(n.pointNo);
-    n.rally = { hitter: n.server, shots: 0, pressure: false };
-    n.ys = [110, 110];
-    const detail = `${teams[winner].name} take the point. Tiebreak: ${n.points[0]}-${n.points[1]}.${!n.over && n.server !== s.server ? ` ${teams[n.server].name} to serve.` : ''}`;
-    return { state: n, anim, headline: banner, detail, tone: winner === actor ? 'great' : 'bad', quick: false, triggers };
-  },
-  status(s, teams) {
-    if (s.over) return 'FINAL';
-    const c = GAME_CONFIG.tennis;
-    const tag = s.points.some((p) => p >= c.pointsToWin - 1) && Math.abs(s.points[0] - s.points[1]) >= 1 ? ' · SET POINT' : '';
-    return `TIEBREAK · ${teams[s.server].name} SERVING · SHOT ${s.rally.shots + 1}${s.rally.pressure ? ' · UNDER PRESSURE' : ''}${tag}`;
-  },
-  scene: (s) => ({ sport: 'tennis', hitter: s.rally.hitter, ys: s.ys }),
-  boxScore(s) {
-    return { columns: ['ACES', 'WINNERS', 'SMASHES', 'ERRORS'], rows: s.ts.map((t) => [t.aces, t.winners, t.smashes, t.errors]) };
-  },
-};
-
-const SoccerEngine = {
-  id: 'soccer',
-  label: 'SOCCER SHOOTOUT',
-  icon: '⚽',
-  head: 'hair',
-  blurb: '5 penalties each, then sudden death. Rarity sets shot power & placement vs the diving keeper. Weak shots get stolen for a BREAKAWAY goal.',
-  init() {
-    return { kicks: [[], []], goals: [0, 0], bonus: [0, 0], kicker: 0, over: false };
-  },
-  currentActor: (s) => s.kicker,
-  isOver: (s) => s.over,
-  scores: (s) => s.goals,
-  resolve(s, o, actor, teams, mods) {
-    const c = GAME_CONFIG.soccer;
-    const M = mods ? mods[actor] : null;
-    const triggers = [];
-    const n = clone(s);
-    const opp = 1 - actor;
-    const side = Math.random() < 0.5 ? -1 : 1;
-    let result;
-    let gx;
-    let gy;
-    let flight;
-    let diveDir;
-    let diveHigh = false;
-    let banner;
-    if (o.kind !== 'answer') {
-      result = 'miss';
-      const over = Math.random() < 0.5;
-      gx = over ? side * 0.4 : side * 1.4;
-      gy = over ? 1.35 : 0.3;
-      flight = 0.5;
-      diveDir = pick([-1, 0, 1]);
-      banner = o.kind === 'timeout' ? 'SHANKED IT!' : over ? 'OVER THE BAR!' : 'WIDE!';
-    } else if (o.counter) {
-      result = 'breakaway';
-      gx = side * 0.74;
-      gy = 0.15;
-      flight = 0.62;
-      diveDir = side;
-      banner = 'BREAKAWAY GOAL!';
-    } else {
-      const shot = c.shots[o.tier];
-      flight = shot.flight;
-      const roll = Math.random();
-      const saveP = Math.max(0, shot.save - (M ? M.finisher : 0));
-      if (roll >= saveP && roll < shot.save) triggers.push(`FINISHER (${M.src.finisher}) beat the keeper`);
-      if (roll < saveP) {
-        result = 'save';
-        gx = side * 0.74;
-        gy = rand(shot.gy[0], shot.gy[1]);
-        diveDir = side;
-        diveHigh = gy > 0.5;
-        banner = 'SAVED!';
-      } else {
-        result = 'goal';
-        gx = side * shot.gx;
-        gy = rand(shot.gy[0], shot.gy[1]);
-        diveDir = o.tier === 5 ? side : -side; // tier 5 beats a correct dive, others send the keeper the wrong way
-        banner = o.tier === 5 ? 'TOP BINS!' : o.tier === 4 ? 'CORNER GOAL!' : 'GOAL!';
-      }
-    }
-    n.kicks[actor].push(result === 'goal' ? 'G' : 'X');
-    if (result === 'goal') n.goals[actor] += 1;
-    if (result === 'breakaway' && c.counterAwardsGoal) {
-      n.goals[opp] += 1;
-      n.bonus[opp] += 1;
-    }
-    const k0 = n.kicks[0].length;
-    const k1 = n.kicks[1].length;
-    if (k0 <= c.rounds && k1 <= c.rounds) {
-      const rem0 = c.rounds - k0;
-      const rem1 = c.rounds - k1;
-      if (n.goals[0] > n.goals[1] + rem1 || n.goals[1] > n.goals[0] + rem0) n.over = true;
-    }
-    if (k0 === k1 && k0 >= c.rounds && n.goals[0] !== n.goals[1]) n.over = true;
-    if (k0 === k1 && k0 >= c.rounds + c.maxSuddenDeathRounds) n.over = true;
-    n.kicker = k0 > k1 ? 1 : 0;
-    const scoreLine = `Shootout: ${n.goals[0]}-${n.goals[1]}.`;
-    const details = {
-      goal: `${teams[actor].name} bury it! ${scoreLine}`,
-      save: `${teams[opp].name}'s keeper reads it and parries. ${scoreLine}`,
-      miss: `${o.kind === 'timeout' ? 'Ran out of time and' : 'Bad answer,'} the shot sails off target. ${scoreLine}`,
-      breakaway: `Too obvious! The keeper smothers it and launches a counter: ${teams[opp].name} score on the breakaway. ${scoreLine}`,
-    };
-    return {
-      state: n,
-      anim: { sport: 'soccer', kicker: actor, result, gx, gy, flight, diveDir, diveHigh, banner },
-      headline: banner,
-      detail: details[result],
-      tone: result === 'goal' ? 'great' : 'bad',
-      quick: false,
-      triggers,
-    };
-  },
-  status(s) {
-    if (s.over) return 'FINAL';
-    const round = s.kicks[s.kicker].length + 1;
-    return round > GAME_CONFIG.soccer.rounds ? `SUDDEN DEATH · ROUND ${round}` : `PENALTY SHOOTOUT · ROUND ${round}/${GAME_CONFIG.soccer.rounds}`;
-  },
-  scene: (s) => ({ sport: 'soccer', kicker: s.kicker }),
-  pips(s, team) {
-    const len = Math.max(GAME_CONFIG.soccer.rounds, s.kicks[0].length, s.kicks[1].length);
-    return Array.from({ length: len }, (_, i) => s.kicks[team][i] || null);
-  },
-  boxScore(s) {
-    const len = Math.max(GAME_CONFIG.soccer.rounds, s.kicks[0].length, s.kicks[1].length);
-    const columns = [...Array.from({ length: len }, (_, i) => `K${i + 1}`), 'BRK'];
-    return { columns, rows: [0, 1].map((t) => [...Array.from({ length: len }, (_, i) => (s.kicks[t][i] === 'G' ? 'O' : s.kicks[t][i] === 'X' ? 'X' : '-')), s.bonus[t]]) };
-  },
-};
-
-export const SPORT_ENGINES = { football: FootballEngine, tennis: TennisEngine, soccer: SoccerEngine };
-
 const newStats = () => ({ plays: 0, correct: 0, tiers: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, tierSum: 0, invalid: 0, timeouts: 0, dupes: 0, countered: 0, forced: 0, best: null });
 
 function recordStats(mine, theirs, o) {
@@ -1831,41 +3214,28 @@ function recordStats(mine, theirs, o) {
   else mine.invalid += 1;
 }
 
-function createMatch(setup) {
-  return {
-    sport: SPORT_ENGINES[setup.sport].init(),
-    stats: [newStats(), newStats()],
-    used: new Set(),
-    deck: shuffle(TRIVIA_BANK.map((_, i) => i)),
-    deckPos: 0,
-    lastHumanActor: null,
-    turn: null,
-    turnId: 0,
-    result: null,
-    shownSport: null,
-  };
-}
-
 /* =============================================================================
    5b. CAREER_ENGINE  (pure functions over a JSON save: club, league, market)
 ============================================================================= */
-const SPORT_IDS = ['football', 'tennis', 'soccer'];
-const POSITIONS = {
-  football: ['QB', 'WR', 'RB', 'TE', 'LB', 'CB', 'K'],
-  tennis: ['BASELINER', 'BIG SERVER', 'NET RUSHER', 'ALL-COURT'],
-  soccer: ['ST', 'WING', 'MID', 'DEF', 'GK'],
+const SPORT_IDS = ['football', 'basketball', 'soccer', 'tennis'];
+export const ROLES = {
+  football: ['QB', 'RB', 'WR', 'TE', 'OL'],
+  basketball: ['PG', 'SG', 'SF', 'PF', 'C'],
+  soccer: ['GK', 'DEF', 'MID', 'WING', 'ST'],
+  tennis: ['SINGLES'],
 };
+const ROLE_NAMES = { QB: 'QUARTERBACK', RB: 'RUNNING BACK', WR: 'WIDE RECEIVER', TE: 'TIGHT END', OL: 'LINEMAN', PG: 'POINT GUARD', SG: 'SHOOTING GUARD', SF: 'SMALL FORWARD', PF: 'POWER FORWARD', C: 'CENTER', GK: 'GOALKEEPER', DEF: 'DEFENDER', MID: 'MIDFIELDER', WING: 'WINGER', ST: 'STRIKER', SINGLES: 'SINGLES' };
 const FIRST_NAMES = ['Ace', 'Blaze', 'Chip', 'Dex', 'Echo', 'Flash', 'Gus', 'Hank', 'Ivy', 'Jett', 'Kit', 'Lux', 'Max', 'Nova', 'Ozzy', 'Pip', 'Quinn', 'Rex', 'Sky', 'Tess', 'Uma', 'Vin', 'Wren', 'Zed', 'Bo', 'Cruz', 'Dot', 'Fizz', 'Juno', 'Koda', 'Remy', 'Sol', 'Mika', 'Taz'];
 const LAST_NAMES = ['Byte', 'Pixel', 'Turbo', 'Voltage', 'McCoy', 'Rocket', 'Blitz', 'Crunch', 'Dash', 'Glitch', 'Hammer', 'Joystick', 'Laser', 'Megabit', 'Nitro', 'Overdrive', 'Quasar', 'Raster', 'Sprite', 'Thunder', 'Vector', 'Warp', 'Zapper', 'Bitmap', 'Combo', 'Cartridge', 'Chiptune', 'Hiscore'];
 const SKIN_TONES = ['#ffdbac', '#f2c18d', '#e0a370', '#c68642', '#8d5524', '#5c3a1e'];
 const HAIR_COLORS = ['#3b2414', '#1a1a1a', '#d9a441', '#a33c1c', '#e8e8e8', '#6b3fa0', '#2b59c3'];
 const MOD_KEY = { clock: 'extraTime', scout: 'hintChance', retry: 'retries' };
-const MOD_CAPS = { hintChance: 0.9, shield: 0.8, ballhawk: 0.35, clutch: 0.95, composure: 0.7, bigserve: 0.6, finisher: 0.4 };
+const MOD_CAPS = { hintChance: 0.9, shield: 0.8, ballhawk: 0.35, clutch: 0.95, composure: 0.7, bigserve: 0.6, finisher: 0.4, power: 0.7, shooter: 0.35 };
 const randInt = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 const triviaCategories = () => [...new Set(TRIVIA_BANK.map((p) => p.category))];
 const isHappy = (p) => p.morale >= CAREER_CONFIG.morale.unhappyBelow;
 
-export const emptyMods = () => ({ extraTime: 0, hintChance: 0, retries: 0, shield: 0, ballhawk: 0, clutch: 0, composure: 0, power: 0, bigserve: 0, finisher: 0, specialists: {}, src: {} });
+export const emptyMods = () => ({ extraTime: 0, hintChance: 0, retries: 0, shield: 0, ballhawk: 0, clutch: 0, composure: 0, power: 0, bigserve: 0, finisher: 0, shooter: 0, specialists: {}, src: {} });
 export const abilityName = (a) => (a.key === 'specialist' ? `${a.cat} BRAIN` : ABILITIES[a.key].name);
 export const abilityDesc = (a) => ABILITIES[a.key].desc(a.mag, a.cat);
 
@@ -1879,6 +3249,7 @@ export function computeMods(players) {
       m.specialists[a.cat] = { chance: Math.min(0.95, (prev ? prev.chance : 0) + a.mag), src: prev ? `${prev.src} + ${p.name}` : p.name };
       return;
     }
+    if (a.key === 'wheels') return; // per-player: applied to that player's run speed on the field
     const k = MOD_KEY[a.key] || a.key;
     m[k] += a.mag;
     m.src[k] = m.src[k] ? `${m.src[k]} + ${p.name}` : p.name;
@@ -1890,14 +3261,13 @@ export function computeMods(players) {
 function varyMag(key, stars) {
   const base = ABILITIES[key].mags[stars - 1];
   if (key === 'clock' || key === 'retry') return base;
-  if (key === 'power') return Math.max(1, base + randInt(-1, 1));
   return Math.round(base * rand(0.9, 1.1) * 100) / 100;
 }
 
 const priceFor = (stars) => Math.round((CAREER_CONFIG.stars[stars].value * rand(0.9, 1.15)) / 5) * 5;
 
-function makePlayer(c, stars, sport) {
-  const keys = ['clock', 'scout', 'retry', 'shield', 'ballhawk', 'clutch', 'composure', 'specialist', 'specialist'];
+function makePlayer(c, stars, sport, role) {
+  const keys = ['clock', 'scout', 'retry', 'shield', 'ballhawk', 'clutch', 'composure', 'wheels', 'specialist', 'specialist'];
   Object.keys(ABILITIES).forEach((k) => ABILITIES[k].sport === sport && keys.push(k, k));
   let ability = null;
   for (let i = 0; i < 30; i++) {
@@ -1911,7 +3281,7 @@ function makePlayer(c, stars, sport) {
     }
   }
   const id = `p${c.nextId++}`;
-  const p = { id, name: `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`, sport, pos: pick(POSITIONS[sport]), stars, ability, value: priceFor(stars), salary: CAREER_CONFIG.stars[stars].salary, contract: randInt(1, 3), morale: CAREER_CONFIG.morale.start, skin: pick(SKIN_TONES), hair: pick(HAIR_COLORS), starter: false, refused: null };
+  const p = { id, name: `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`, sport, pos: role || pick(ROLES[sport]), stars, ability, value: priceFor(stars), salary: CAREER_CONFIG.stars[stars].salary, contract: randInt(1, 3), morale: CAREER_CONFIG.morale.start, skin: pick(SKIN_TONES), hair: pick(HAIR_COLORS), refused: null };
   c.players[id] = p;
   return p;
 }
@@ -1938,19 +3308,35 @@ function addNews(c, msg) {
 
 function refreshFreeAgents(c) {
   c.freeAgents.forEach((id) => delete c.players[id]);
-  c.freeAgents = Array.from({ length: CAREER_CONFIG.freeAgentsPerWeek }, () => makePlayer(c, marketStar(c.season), pick(SPORT_IDS)).id);
+  const fa = Array.from({ length: CAREER_CONFIG.freeAgentsPerWeek }, () => {
+    const sport = pick(SPORT_IDS);
+    return makePlayer(c, marketStar(c.season), sport, pick(ROLES[sport])).id;
+  });
+  // Always offer an affordable option for positions your club still has empty.
+  if (c.lineups) {
+    let extra = 0;
+    SPORT_IDS.forEach((sport) =>
+      ROLES[sport].forEach((role) => {
+        if (extra >= CAREER_CONFIG.coverageAgents || c.lineups[sport][role]) return;
+        const covered = fa.some((id) => c.players[id].sport === sport && c.players[id].pos === role);
+        if (covered) return;
+        fa.push(makePlayer(c, Math.random() < 0.7 ? 1 : 2, sport, role).id);
+        extra += 1;
+      })
+    );
+  }
+  c.freeAgents = fa;
 }
 
 function makeSchedule(n, season) {
   const ids = Array.from({ length: n }, (_, i) => i);
   const out = [];
   for (let r = 0; r < n - 1; r++) {
-    const sport = SPORT_IDS[(r + season - 1) % SPORT_IDS.length];
     for (let i = 0; i < n / 2; i++) {
       const a = ids[i];
       const b = ids[n - 1 - i];
-      const home = (r + i) % 2 ? a : b;
-      out.push({ week: r, sport, home, away: home === a ? b : a, result: null });
+      const home = (r + i + season) % 2 ? a : b;
+      out.push({ week: r, sport: null, home, away: home === a ? b : a, result: null }); // the sport is picked when the match is played
     }
     ids.splice(1, 0, ids.pop()); // circle-method rotation
   }
@@ -1959,27 +3345,27 @@ function makeSchedule(n, season) {
 
 export function newCareer(club) {
   const CC = CAREER_CONFIG;
-  const c = { version: 1, nextId: 1, sigs: {}, season: 1, week: 0, phase: 'regular', coins: CC.startingCoins, players: {}, teams: [], schedule: [], playoffs: null, freeAgents: [], news: [], lastReport: null, offseason: null, history: [] };
+  const c = { version: 2, nextId: 1, sigs: {}, season: 1, week: 0, phase: 'regular', coins: CC.startingCoins, players: {}, teams: [], lineups: emptyLineups(), schedule: [], playoffs: null, freeAgents: [], news: [], lastReport: null, offseason: null, history: [] };
   const user = { name: club.name, primary: club.primary, secondary: club.secondary, roster: [] };
-  SPORT_IDS.forEach((sport) =>
-    [1, 1, 2].forEach((stars) => {
-      const p = makePlayer(c, stars, sport);
-      p.starter = true;
+  c.teams.push(user);
+  // Free starter squad: it does NOT fill every position, so you have to buy the rest.
+  SPORT_IDS.forEach((sport) => {
+    const roles = shuffle(ROLES[sport]).slice(0, CC.freeStartersPerSport[sport]);
+    roles.forEach((role) => {
+      const p = makePlayer(c, 1, sport, role);
       p.contract = 2;
       user.roster.push(p.id);
-    })
-  );
-  c.teams.push(user);
+      c.lineups[sport][role] = p.id;
+    });
+  });
   CC.rivals.forEach((r) => {
     const t = { ...r, roster: [] };
-    SPORT_IDS.forEach((sport) => {
-      for (let i = 0; i < 3; i++) t.roster.push(makePlayer(c, rivalStar(CC.rivalStarsMean), sport).id);
-    });
+    SPORT_IDS.forEach((sport) => ROLES[sport].forEach((role) => t.roster.push(makePlayer(c, rivalStar(CC.rivalStarsMean), sport, role).id)));
     c.teams.push(t);
   });
   c.schedule = makeSchedule(c.teams.length, c.season);
   refreshFreeAgents(c);
-  addNews(c, `${club.name} founded! Your free starter squad has reported for duty.`);
+  addNews(c, `${club.name} founded! Your free squad only covers some positions: fill every role of a sport in the MARKET before you can play it.`);
   return c;
 }
 
@@ -2011,19 +3397,16 @@ export function standings(c) {
 export const teamPlayers = (c, i) => c.teams[i].roster.map((id) => c.players[id]);
 
 /** Players whose abilities are active for team i in a given sport. */
+/** Players whose abilities are active for team i in a given sport. */
 export function activeFor(c, i, sport) {
-  const ps = teamPlayers(c, i).filter((p) => p.sport === sport);
-  if (i === 0) return ps.filter((p) => p.starter);
-  return ps.sort((a, b) => b.stars - a.stars).slice(0, CAREER_CONFIG.startersPerSport);
+  return Object.values(rosterFor(c, i, sport)).filter(Boolean);
 }
 
 export function teamRating(c, i, sport) {
-  const r = activeFor(c, i, sport).map((p) => (isHappy(p) ? p.stars : p.stars * 0.6));
-  while (r.length < CAREER_CONFIG.startersPerSport) r.push(0.5); // empty starting slot
+  const r = Object.values(rosterFor(c, i, sport)).map((p) => (!p ? 0.5 : isHappy(p) ? p.stars : p.stars * 0.6));
   return r.reduce((s, v) => s + v, 0) / r.length;
 }
 
-/** Blend the CPU difficulty tables by a 1-5 team rating. */
 export function cpuWeightsForRating(r) {
   const D = GAME_CONFIG.cpu.difficulties;
   const t = clamp((r - 1) / 4, 0, 1);
@@ -2043,11 +3426,16 @@ function simScore(sport) {
     const w = randInt(8, 10);
     return [w, w - 2];
   }
-  const w = randInt(3, 5);
+  if (sport === 'basketball') {
+    const w = randInt(14, 30);
+    return [w, w - randInt(2, 10)];
+  }
+  const w = randInt(2, 5);
   return [w, Math.max(0, w - randInt(1, 2))];
 }
 
 function simFixture(c, f) {
+  if (!f.sport) f.sport = pick(SPORT_IDS);
   const rh = teamRating(c, f.home, f.sport) + 0.15;
   const ra = teamRating(c, f.away, f.sport);
   const homeWins = Math.random() < 1 / (1 + Math.exp(-(rh - ra) * 1.3));
@@ -2066,14 +3454,16 @@ export function currentFixture(c) {
 
 function startPlayoffs(c) {
   const R = CAREER_CONFIG.rewards;
-  const seeds = standings(c).slice(0, 4).map((r) => r.i);
+  const seeds = standings(c)
+    .slice(0, 4)
+    .map((r) => r.i);
   c.phase = 'playoffs';
   c.playoffs = {
     round: 'semi',
     seeds,
     semis: [
-      { home: seeds[0], away: seeds[3], sport: pick(SPORT_IDS), result: null, label: 'SEMIFINAL' },
-      { home: seeds[1], away: seeds[2], sport: pick(SPORT_IDS), result: null, label: 'SEMIFINAL' },
+      { home: seeds[0], away: seeds[3], sport: null, result: null, label: 'SEMIFINAL' },
+      { home: seeds[1], away: seeds[2], sport: null, result: null, label: 'SEMIFINAL' },
     ],
     final: null,
     champion: null,
@@ -2099,6 +3489,7 @@ function endSeason(c) {
 }
 
 /** Simulate every non-user fixture until the user has a match to play, or the season ends. */
+/** Simulate every non-user fixture until the user has a match to play, or the season ends. */
 function advance(c) {
   for (let guard = 0; guard < 50; guard++) {
     if (c.phase === 'regular') {
@@ -2107,7 +3498,7 @@ function advance(c) {
       if (!week.every((f) => f.result)) return;
       c.week += 1;
       refreshFreeAgents(c);
-      c.players && Object.values(c.players).forEach((p) => (p.refused = null));
+      Object.values(c.players).forEach((p) => (p.refused = null));
       if (c.week >= seasonWeeks(c)) startPlayoffs(c);
     } else if (c.phase === 'playoffs') {
       const P = c.playoffs;
@@ -2116,7 +3507,7 @@ function advance(c) {
       if (!round.every((f) => f.result)) return;
       if (P.round === 'semi') {
         const [a, b] = P.semis.map(winnerOf);
-        P.final = { home: a, away: b, sport: pick(SPORT_IDS), result: null, label: 'CHAMPIONSHIP' };
+        P.final = { home: a, away: b, sport: null, result: null, label: 'CHAMPIONSHIP' };
         P.round = 'final';
         if (a !== 0 && b !== 0 && P.semis.some((f) => f.home === 0 || f.away === 0)) addNews(c, `${c.teams[0].name} were knocked out in the semifinals.`);
       } else {
@@ -2136,6 +3527,7 @@ export function finishUserMatch(c0, res) {
   const R = CC.rewards;
   const f = currentFixture(c);
   if (!f) return c;
+  f.sport = res.sport || f.sport || 'soccer';
   const userHome = f.home === 0;
   const rival = userHome ? f.away : f.home;
   const [us, them] = res.forfeit ? CC.forfeitScores[f.sport] : res.scores;
@@ -2151,14 +3543,15 @@ export function finishUserMatch(c0, res) {
   c.coins += base + bonus + playoffBonus;
   const paid = c.coins >= wages;
   c.coins = Math.max(0, c.coins - wages);
+  const starters = new Set(Object.values(c.lineups[f.sport]).filter(Boolean));
   roster.forEach((p) => {
     let d = CC.morale[outcome];
-    if (p.sport === f.sport) d += p.starter ? CC.morale.starterBonus : CC.morale.benchedPenalty;
+    if (p.sport === f.sport) d += starters.has(p.id) ? CC.morale.starterBonus : CC.morale.benchedPenalty;
     if (!paid) d += CC.morale.unpaid;
     p.morale = clamp(p.morale + d, 0, 100);
   });
   c.lastReport = { rival: c.teams[rival].name, sport: f.sport, scores: [us, them], outcome, base, bonus, playoffBonus, wages, paid, label: playoff ? f.label : `WEEK ${c.week + 1}`, forfeit: !!res.forfeit };
-  addNews(c, `${res.forfeit ? 'FORFEIT' : outcome.toUpperCase()} ${us}-${them} vs ${c.teams[rival].name} (${SPORT_ENGINES[f.sport].label}).`);
+  addNews(c, `${res.forfeit ? 'FORFEIT' : outcome.toUpperCase()} ${us}-${them} vs ${c.teams[rival].name} (${SPORT_INFO[f.sport].label}).`);
   if (!paid) addNews(c, `Couldn't cover ${wages} in wages. Morale is tanking!`);
   advance(c);
   return c;
@@ -2170,6 +3563,7 @@ export function startNextSeason(c0) {
   const leaving = c.teams[0].roster.filter((id) => c.players[id].contract <= 0);
   leaving.forEach((id) => {
     addNews(c, `${c.players[id].name} walked out when their contract expired.`);
+    removeFromLineup(c, id);
     delete c.players[id];
   });
   c.teams[0].roster = c.teams[0].roster.filter((id) => !leaving.includes(id));
@@ -2182,11 +3576,13 @@ export function startNextSeason(c0) {
     p.morale = Math.round(lerp(p.morale, CC.morale.start, 0.5));
   });
   const mean = CC.rivalStarsMean + (c.season - 1) * CC.rivalStarsPerSeason;
-  c.teams.slice(1).forEach((t) => {
-    teamPlayers(c, c.teams.indexOf(t)).forEach((p) => p.stars < 5 && Math.random() < CC.rivalDevelopChance && upgradeStars(p));
-    const weakest = teamPlayers(c, c.teams.indexOf(t)).sort((a, b) => a.stars - b.stars)[0];
-    if (weakest) {
-      const fresh = makePlayer(c, rivalStar(mean), weakest.sport);
+  c.teams.slice(1).forEach((t, k) => {
+    const ti = k + 1;
+    teamPlayers(c, ti).forEach((p) => p.stars < 5 && Math.random() < CC.rivalDevelopChance && upgradeStars(p));
+    for (let n = 0; n < 2; n++) {
+      const weakest = teamPlayers(c, ti).sort((a, b) => a.stars - b.stars)[0];
+      if (!weakest) break;
+      const fresh = makePlayer(c, Math.max(weakest.stars, rivalStar(mean)), weakest.sport, weakest.pos);
       t.roster = t.roster.filter((id) => id !== weakest.id).concat(fresh.id);
       delete c.players[weakest.id];
     }
@@ -2203,11 +3599,10 @@ export function startNextSeason(c0) {
 }
 
 // --- Market & roster actions: each returns { c, ok, msg } -------------------------
-const starterCount = (c, sport) => teamPlayers(c, 0).filter((p) => p.sport === sport && p.starter).length;
 
 function joinClub(c, p) {
-  p.starter = starterCount(c, p.sport) < CAREER_CONFIG.startersPerSport;
   c.teams[0].roster.push(p.id);
+  if (!c.lineups[p.sport][p.pos] || !c.players[c.lineups[p.sport][p.pos]]) c.lineups[p.sport][p.pos] = p.id;
   p.contract = randInt(2, 3);
   p.refused = null;
   p.morale = clamp(p.morale + CAREER_CONFIG.morale.newSigning, 0, 100);
@@ -2222,8 +3617,9 @@ export function buyPlayer(c0, id) {
   c.coins -= p.value;
   c.freeAgents = c.freeAgents.filter((x) => x !== id);
   joinClub(c, p);
-  addNews(c, `SIGNED ${p.name} (${p.stars}-STAR ${p.sport.toUpperCase()}) for ${p.value}.`);
-  return { c, ok: true, msg: `${p.name} signed${p.starter ? ' and starts' : ' (on the bench)'}!` };
+  const starts = c.lineups[p.sport][p.pos] === p.id;
+  addNews(c, `SIGNED ${p.name} (${p.stars}-STAR ${p.pos}, ${p.sport.toUpperCase()}) for ${p.value}.`);
+  return { c, ok: true, msg: `${p.name} signed${starts ? ` and starts at ${p.pos}` : ' (on the bench)'}!` };
 }
 
 export function sellPlayer(c0, id) {
@@ -2233,21 +3629,24 @@ export function sellPlayer(c0, id) {
   const fee = Math.round(p.value * CAREER_CONFIG.sellRatio);
   c.coins += fee;
   c.teams[0].roster = c.teams[0].roster.filter((x) => x !== id);
+  removeFromLineup(c, id);
   delete c.players[id];
   addNews(c, `SOLD ${p.name} for ${fee}.`);
-  return { c, ok: true, msg: `Sold ${p.name} for ${fee} coins.` };
+  return { c, ok: true, msg: `Sold ${p.name} for ${fee} coins.${missingRoles(c, p.sport).includes(p.pos) ? ` Your ${p.sport} ${p.pos} slot is now empty.` : ''}` };
 }
 
+/** Put a player into their position's lineup slot (benching whoever was there), or bench them. */
 export function toggleStarter(c0, id) {
   const c = clone(c0);
   const p = c.players[id];
-  if (p.starter) {
-    p.starter = false;
-    return { c, ok: true, msg: `${p.name} moved to the bench.` };
+  if (!p) return { ok: false, msg: 'Player not found.' };
+  if (c.lineups[p.sport][p.pos] === id) {
+    c.lineups[p.sport][p.pos] = null;
+    return { c, ok: true, msg: `${p.name} benched. Your ${p.pos} slot is empty until you start someone.` };
   }
-  if (starterCount(c, p.sport) >= CAREER_CONFIG.startersPerSport) return { ok: false, msg: `Only ${CAREER_CONFIG.startersPerSport} ${p.sport} starters allowed. Bench someone first.` };
-  p.starter = true;
-  return { c, ok: true, msg: `${p.name} is now a starter.` };
+  const prev = c.lineups[p.sport][p.pos] ? c.players[c.lineups[p.sport][p.pos]] : null;
+  c.lineups[p.sport][p.pos] = id;
+  return { c, ok: true, msg: `${p.name} now starts at ${p.pos}${prev ? ` (replacing ${prev.name})` : ''}.` };
 }
 
 export function offerChance(c, teamIdx, p, offer) {
@@ -2272,7 +3671,7 @@ export function offerForPlayer(c0, teamIdx, id, offerId) {
   }
   c.coins -= price;
   t.roster = t.roster.filter((x) => x !== id);
-  const replacement = makePlayer(c, Math.max(1, p.stars - 1), p.sport);
+  const replacement = makePlayer(c, Math.max(1, p.stars - 1), p.sport, p.pos);
   t.roster.push(replacement.id);
   joinClub(c, p);
   addNews(c, `POACHED ${p.name} from ${t.name} for ${price}!`);
@@ -2295,8 +3694,7 @@ export function resignPlayer(c0, id) {
 export function loadCareer() {
   try {
     const raw = window.localStorage.getItem(CAREER_CONFIG.saveKey);
-    const c = raw ? JSON.parse(raw) : null;
-    return c && c.version === 1 ? c : null;
+    return raw ? migrateCareer(JSON.parse(raw)) : null;
   } catch (e) {
     return null;
   }
@@ -2331,12 +3729,12 @@ const GUTTER = { paddingLeft: 'max(16px, env(safe-area-inset-left, 0px))', paddi
 const REPO_URL = 'https://github.com/siddharthsivaramancode/krillion-sports-spinoff';
 const DOWNLOAD_URL = `${REPO_URL}/blob/main/retro-clash.html`;
 
-function SideLinks() {
+function SideLinks({ rail = true }) {
   const link = 'border-2 border-black bg-[#1b1736] px-2 py-2 text-[8px] text-white shadow-[2px_2px_0_#000] hover:bg-[#2a2450] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#ffd23f]';
   return (
     <>
       {/* desktop: a rail pinned to the right edge */}
-      <nav aria-label="Project links" className="fixed top-1/2 z-30 hidden -translate-y-1/2 flex-col gap-2 2xl:flex" style={{ right: 'max(8px, env(safe-area-inset-right, 0px))' }}>
+      <nav aria-label="Project links" className={`fixed top-1/2 z-30 hidden -translate-y-1/2 flex-col gap-2 ${rail ? '2xl:flex' : ''}`} style={{ right: 'max(8px, env(safe-area-inset-right, 0px))' }}>
         <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className={link} style={{ ...FONT_STYLE, writingMode: 'vertical-rl' }}>
           GITHUB ↗
         </a>
@@ -2345,11 +3743,11 @@ function SideLinks() {
         </a>
       </nav>
       {/* phones/tablets: compact links in the top bar */}
-      <span className="flex gap-2 2xl:hidden">
-        <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className="border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] text-white shadow-[2px_2px_0_#000]" style={FONT_STYLE}>
+      <span className={`flex gap-2 ${rail ? '2xl:hidden' : ''}`}>
+        <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className="hidden whitespace-nowrap border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] text-white shadow-[2px_2px_0_#000] sm:inline-block" style={FONT_STYLE}>
           GITHUB
         </a>
-        <a href={DOWNLOAD_URL} target="_blank" rel="noopener noreferrer" className="border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] text-[#ffd23f] shadow-[2px_2px_0_#000]" style={FONT_STYLE} title="Standalone HTML file">
+        <a href={DOWNLOAD_URL} target="_blank" rel="noopener noreferrer" className="whitespace-nowrap border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] text-[#ffd23f] shadow-[2px_2px_0_#000]" style={FONT_STYLE} title="Standalone HTML file">
           ↓ HTML
         </a>
       </span>
@@ -2357,8 +3755,15 @@ function SideLinks() {
   );
 }
 
+const SPORT_INFO = {
+  football: { id: 'football', label: 'FOOTBALL', icon: '🏈', head: 'helmet', blurb: '5-on-5. Hike, scramble with WASD and throw. Every throw is a question: rare answers hit your receiver in stride, obvious ones get picked off.' },
+  basketball: { id: 'basketball', label: 'BASKETBALL', icon: '🏀', head: 'hair', blurb: '5-on-5 full court. Dribble with WASD, pass to switch players, shoot from anywhere. Rare answers splash threes, obvious ones get blocked.' },
+  soccer: { id: 'soccer', label: 'SOCCER', icon: '⚽', head: 'hair', blurb: '5-a-side. Dribble with WASD, pass to switch players, shoot to score. Rare answers find the top corner, obvious ones get smothered.' },
+  tennis: { id: 'tennis', label: 'TENNIS', icon: '🎾', head: 'hair', blurb: 'Tiebreak to 7. Run to the ball with WASD; every shot is a question. Rare answers are aces and winners, obvious ones get smashed back.' },
+};
+
 const DEFAULT_SETUP = {
-  sport: 'football',
+  sport: 'soccer',
   mode: '1p',
   difficulty: 'pro',
   teams: [
@@ -2500,30 +3905,21 @@ function TeamCard({ index, team, onChange, isCPU, head }) {
 
 function SetupScreen({ initial, onStart }) {
   const [setup, setSetup] = useState(initial);
-  const engine = SPORT_ENGINES[setup.sport];
+  const info = SPORT_INFO[setup.sport] || SPORT_INFO.soccer;
   const setTeam = (i, t) => setSetup((s) => ({ ...s, teams: s.teams.map((x, j) => (j === i ? t : x)) }));
   const start = () => {
-    const teams = setup.teams.map((t, i) => ({ ...t, name: t.name.trim() || (i === 0 ? 'HOME' : 'AWAY'), isCPU: setup.mode === '1p' && i === 1 }));
+    const teams = setup.teams.map((t, i) => ({ ...t, name: t.name.trim() || (i === 0 ? 'HOME' : 'AWAY'), isCPU: setup.mode === '1p' && i === 1, roster: quickRoster(setup.sport, 2) }));
     onStart({ ...setup, teams });
   };
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
-      <div className="text-center">
-        <h1 className="text-2xl leading-relaxed text-[#ffd23f] sm:text-4xl" style={{ textShadow: '4px 4px 0 #e63946, 8px 8px 0 #000' }}>
-          RETRO CLASH
-        </h1>
-        <div className="mt-2 text-sm text-[#4cc9f0] sm:text-lg" style={{ textShadow: '3px 3px 0 #000' }}>
-          TRIVIA BOWL
-        </div>
-        <p className="mx-auto mt-3 max-w-xl text-[9px] leading-relaxed text-slate-300">
-          Answer survey-style prompts. RARE answers make big plays. OBVIOUS answers invite a counter-attack.
-        </p>
-      </div>
-
+    <div className="m-auto flex w-full max-w-6xl flex-col gap-5">
+      <h1 className="text-center text-xl leading-relaxed text-[#ffd23f] sm:text-3xl" style={{ textShadow: '3px 3px 0 #e63946, 6px 6px 0 #000' }}>
+        QUICK MATCH
+      </h1>
       <section>
-        <div className="mb-2 text-[10px] text-slate-400">1. SPORT MODE</div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {Object.values(SPORT_ENGINES).map((e) => (
+        <div className="mb-2 text-[10px] text-slate-400">1. PICK A SPORT</div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {Object.values(SPORT_INFO).map((e) => (
             <button
               key={e.id}
               type="button"
@@ -2532,35 +3928,28 @@ function SetupScreen({ initial, onStart }) {
                 SOUND_ENGINE.play('select');
                 setSetup((s) => ({ ...s, sport: e.id }));
               }}
-              className={`border-4 border-black p-3 text-left shadow-[4px_4px_0_#000] ${setup.sport === e.id ? 'bg-[#ffd23f] text-black' : 'bg-[#1b1736] text-white'}`}
+              className={`border-4 border-black p-3 text-left shadow-[4px_4px_0_#000] transition-transform hover:-translate-y-1 ${setup.sport === e.id ? 'bg-[#ffd23f] text-black' : 'bg-[#1b1736] text-white'}`}
               style={FONT_STYLE}
             >
-              <div className="text-xl">{e.icon}</div>
-              <div className="mt-1 text-[10px]">{e.label}</div>
+              <div className="text-2xl">{e.icon}</div>
+              <div className="mt-1 text-[11px]">{e.label}</div>
               <div className={`mt-2 text-[8px] leading-relaxed ${setup.sport === e.id ? 'text-black/70' : 'text-slate-400'}`}>{e.blurb}</div>
             </button>
           ))}
         </div>
       </section>
-
       <section className="flex flex-wrap items-end gap-4">
         <div>
           <div className="mb-2 text-[10px] text-slate-400">2. PLAYERS</div>
           <div className="flex gap-2">
             {[
               ['1p', '1P VS CPU'],
-              ['2p', '2P PASS & PLAY'],
+              ['2p', '2P SAME KEYBOARD'],
             ].map(([id, label]) => (
               <button
                 key={id}
                 type="button"
-                onClick={() =>
-                  setSetup((s) => ({
-                    ...s,
-                    mode: id,
-                    teams: s.teams.map((t, i) => (i === 1 && id === '2p' && t.name === 'CPU CYBORGS' ? { ...t, name: 'PIXEL PIRATES' } : i === 1 && id === '1p' && t.name === 'PIXEL PIRATES' ? { ...t, name: 'CPU CYBORGS' } : t)),
-                  }))
-                }
+                onClick={() => setSetup((s) => ({ ...s, mode: id, teams: s.teams.map((t, i) => (i === 1 && id === '2p' && t.name === 'CPU CYBORGS' ? { ...t, name: 'PIXEL PIRATES' } : i === 1 && id === '1p' && t.name === 'PIXEL PIRATES' ? { ...t, name: 'CPU CYBORGS' } : t)) }))}
                 className={`border-4 border-black px-3 py-2 text-[10px] shadow-[3px_3px_0_#000] ${setup.mode === id ? 'bg-[#4cc9f0] text-black' : 'bg-[#1b1736] text-white'}`}
                 style={FONT_STYLE}
               >
@@ -2569,122 +3958,34 @@ function SetupScreen({ initial, onStart }) {
             ))}
           </div>
         </div>
-        {setup.mode === '1p' && (
+        {setup.mode === '1p' ? (
           <div>
             <div className="mb-2 text-[10px] text-slate-400">CPU SKILL</div>
             <div className="flex gap-2">
               {Object.entries(GAME_CONFIG.cpu.difficulties).map(([id, d]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setSetup((s) => ({ ...s, difficulty: id }))}
-                  className={`border-4 border-black px-3 py-2 text-[10px] shadow-[3px_3px_0_#000] ${setup.difficulty === id ? 'bg-[#c77dff] text-black' : 'bg-[#1b1736] text-white'}`}
-                  style={FONT_STYLE}
-                >
+                <button key={id} type="button" onClick={() => setSetup((s) => ({ ...s, difficulty: id }))} className={`border-4 border-black px-3 py-2 text-[10px] shadow-[3px_3px_0_#000] ${setup.difficulty === id ? 'bg-[#c77dff] text-black' : 'bg-[#1b1736] text-white'}`} style={FONT_STYLE}>
                   {d.label}
                 </button>
               ))}
             </div>
           </div>
+        ) : (
+          <div className="text-[8px] leading-relaxed text-slate-400">P1: WASD + F / G · P2: ARROWS + K / L</div>
         )}
       </section>
-
       <section>
         <div className="mb-2 text-[10px] text-slate-400">3. TEAMS & JERSEYS</div>
         <div className="grid gap-4 md:grid-cols-2">
           {setup.teams.map((t, i) => (
-            <TeamCard key={i} index={i} team={t} isCPU={setup.mode === '1p' && i === 1} head={engine.head} onChange={(nt) => setTeam(i, nt)} />
+            <TeamCard key={i} index={i} team={t} isCPU={setup.mode === '1p' && i === 1} head={info.head} onChange={(nt) => setTeam(i, nt)} />
           ))}
         </div>
       </section>
-
       <div className="flex justify-center pb-4">
-        <PixelButton onClick={start} className="px-8 text-sm">
-          ▶ {setup.sport === 'football' ? 'KICK OFF' : setup.sport === 'tennis' ? 'SERVE IT UP' : 'STEP UP'}
+        <PixelButton onClick={start} className="px-10 text-sm">
+          ▶ PLAY {info.label}
         </PixelButton>
       </div>
-    </div>
-  );
-}
-
-function GameCanvas({ timeline, onEnd }) {
-  const canvasRef = useRef(null);
-  const tlRef = useRef(timeline);
-  const startRef = useRef(0);
-  const firedRef = useRef(new Set());
-  const endedRef = useRef(false);
-  const onEndRef = useRef(onEnd);
-  onEndRef.current = onEnd;
-
-  useEffect(() => {
-    tlRef.current = timeline;
-    startRef.current = performance.now();
-    firedRef.current = new Set();
-    endedRef.current = false;
-  }, [timeline]);
-
-  useEffect(() => {
-    const ctx = canvasRef.current.getContext('2d');
-    let raf;
-    const loop = (now) => {
-      const tl = tlRef.current;
-      if (tl) {
-        const t = (now - startRef.current) / 1000;
-        tl.events.forEach((ev, i) => {
-          if (ev.sound && ev.t <= t && !firedRef.current.has(i)) {
-            firedRef.current.add(i);
-            SOUND_ENGINE.play(ev.sound);
-          }
-        });
-        try {
-          renderFrame(ctx, tl, tl.idle ? t : Math.min(t, tl.duration), now / 1000);
-        } catch (e) {
-          /* never let a draw error freeze the loop */
-        }
-        if (!tl.idle && t >= tl.duration && !endedRef.current) {
-          endedRef.current = true;
-          if (onEndRef.current) onEndRef.current();
-        }
-      }
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, []);
-
-  return <canvas ref={canvasRef} width={CW} height={CH} className="block w-full border-4 border-black bg-black" style={{ imageRendering: 'pixelated', aspectRatio: '16 / 9' }} />;
-}
-
-function Scoreboard({ teams, engine, sportState, activeTeam }) {
-  const scores = engine.scores(sportState);
-  const side = (i) => (
-    <div className={`flex min-w-0 flex-1 items-center gap-2 ${i === 1 ? 'flex-row-reverse text-right' : ''}`}>
-      <div className="h-8 w-3 shrink-0 border-2 border-black" style={{ background: `linear-gradient(${teams[i].primary} 60%, ${teams[i].secondary} 60%)` }} />
-      <div className="min-w-0">
-        <div className="truncate text-[9px] sm:text-[11px]" style={{ color: teams[i].primary === '#222222' ? '#ddd' : teams[i].primary }}>
-          {activeTeam === i && <span className="text-[#ffd23f]">{i === 0 ? '▶ ' : ''}</span>}
-          {teams[i].name}
-          {activeTeam === i && i === 1 && <span className="text-[#ffd23f]"> ◀</span>}
-        </div>
-        {engine.pips && (
-          <div className={`mt-1 flex gap-[3px] ${i === 1 ? 'justify-end' : ''}`}>
-            {engine.pips(sportState, i).map((p, k) => (
-              <span key={k} className="inline-block h-2 w-2 border border-black" style={{ background: p === 'G' ? '#06d6a0' : p === 'X' ? '#ef476f' : '#444' }} />
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="shrink-0 border-2 border-black bg-black px-2 py-1 text-lg text-[#ffd23f] sm:text-2xl">{String(scores[i]).padStart(2, '0')}</div>
-    </div>
-  );
-  return (
-    <div className="border-4 border-b-0 border-black bg-[#120f26] px-2 py-2">
-      <div className="flex items-center gap-2">
-        {side(0)}
-        <div className="hidden text-[10px] text-slate-500 sm:block">VS</div>
-        {side(1)}
-      </div>
-      <div className="mt-2 text-center text-[8px] leading-relaxed text-[#4cc9f0] sm:text-[9px]">{engine.status(sportState, teams)}</div>
     </div>
   );
 }
@@ -2754,7 +4055,7 @@ function PromptPanel({ prompt, team, seconds, onSubmit, onTimeout, hint, bonusSe
           ref={inputRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="TYPE A RARE ANSWER..."
+          placeholder="TYPE AN ANSWER"
           maxLength={48}
           autoComplete="off"
           spellCheck={false}
@@ -2770,503 +4071,12 @@ function PromptPanel({ prompt, team, seconds, onSubmit, onTimeout, hint, bonusSe
         <span>
           {Math.ceil(left)}s{bonusSeconds ? <span className="text-[#4cc9f0]"> (+{bonusSeconds}s CLOCK MANAGER)</span> : null}
         </span>
-        <span>T1-T2 ANSWERS RISK A COUNTER-ATTACK</span>
+        <span className="hidden sm:inline">T1-T2 ANSWERS RISK A COUNTER-ATTACK</span>
       </div>
     </form>
   );
 }
 
-function CpuPanel({ prompt, team }) {
-  return (
-    <div className="border-4 border-t-0 border-black bg-[#1b1736] p-3 text-center">
-      <div className="mb-2 text-[8px] text-[#c77dff]">{prompt.category}</div>
-      <div className="mb-3 text-[11px] leading-relaxed text-white sm:text-sm">{prompt.prompt}</div>
-      <div className="animate-pulse text-[10px]" style={{ color: inkFor(team.primary) }}>
-        {team.name} IS THINKING...
-      </div>
-    </div>
-  );
-}
-
-function AnswerBoard({ prompt, used, highlightIdx }) {
-  const SHOW = 6;
-  return (
-    <div className="mt-3 border-2 border-black bg-black/60 p-2">
-      <div className="mb-2 flex flex-wrap justify-between gap-2 text-[8px] text-slate-400">
-        <span>THE BOARD · {prompt.answers.length} VALID ANSWERS</span>
-        {prompt.rankedBy && <span className="text-slate-500">RANKED BY {prompt.rankedBy.toUpperCase()}</span>}
-      </div>
-      <div className="flex flex-col gap-1">
-        {[5, 4, 3, 2, 1].map((tier) => {
-          const all = prompt.answers.map((a, idx) => ({ a, idx })).filter(({ a }) => a.tier === tier);
-          const isUsed = ({ idx }) => used.has(usedKey(prompt.id, idx));
-          const hl = all.filter(({ idx }) => idx === highlightIdx);
-          const rest = all.filter(({ idx }) => idx !== highlightIdx).sort((x, y) => Number(isUsed(x)) - Number(isUsed(y)));
-          const shown = [...hl, ...rest].slice(0, SHOW);
-          return (
-            <div key={tier} className="flex flex-wrap items-center gap-1">
-              <span className="w-14 shrink-0 text-[8px]" style={{ color: GAME_CONFIG.tiers[tier].color }}>
-                T{tier} ({all.length})
-              </span>
-              {shown.map((x) => {
-                const h = x.idx === highlightIdx;
-                return (
-                  <span
-                    key={x.idx}
-                    className={`border px-1 py-[2px] text-[8px] ${h ? 'border-white text-black' : 'border-slate-700'} ${isUsed(x) && !h ? 'text-slate-600 line-through' : h ? '' : 'text-slate-200'}`}
-                    style={h ? { background: GAME_CONFIG.tiers[tier].color } : undefined}
-                  >
-                    {x.a.text}
-                  </span>
-                );
-              })}
-              {all.length > shown.length && <span className="text-[8px] text-slate-500">+{all.length - shown.length} MORE</span>}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function TriggerList({ triggers }) {
-  if (!triggers || !triggers.length) return null;
-  return (
-    <div className="mt-3 flex flex-col gap-1">
-      {triggers.map((t, i) => (
-        <div key={i} className="text-[8px] leading-relaxed text-[#4cc9f0]">
-          ⚡ {t}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function FeedbackModal({ result, teams, used, onContinue, autoMs }) {
-  useConfirmKey(onContinue);
-  useEffect(() => {
-    if (!autoMs) return undefined;
-    const id = setTimeout(onContinue, autoMs);
-    return () => clearTimeout(id);
-  }, [autoMs, onContinue]);
-  const { outcome: o, actor, prompt } = result;
-  const team = teams[actor];
-  const tc = TONE_COLORS[result.tone] || '#fff';
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-      <div className="max-h-[92vh] w-full max-w-lg overflow-auto border-4 border-black bg-[#1b1736] p-4 shadow-[6px_6px_0_#000]" style={FONT_STYLE}>
-        <div className="flex items-center justify-between text-[8px] text-slate-400">
-          <span style={{ color: inkFor(team.primary) }}>{team.name}</span>
-          <span>{prompt.category}</span>
-        </div>
-        <div className="mt-2 text-[9px] leading-relaxed text-slate-300">{prompt.prompt}</div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-[10px] text-white">&gt; "{o.kind === 'timeout' ? '...' : o.text}"</span>
-          {o.kind === 'answer' && <TierChip tier={o.tier} />}
-          {o.kind === 'invalid' && <span className="border-2 border-black bg-[#ef476f] px-2 py-1 text-[9px] text-black">NOT ON THE BOARD</span>}
-          {o.kind === 'duplicate' && <span className="border-2 border-black bg-[#ef476f] px-2 py-1 text-[9px] text-black">ALREADY USED</span>}
-          {o.kind === 'timeout' && <span className="border-2 border-black bg-[#ef476f] px-2 py-1 text-[9px] text-black">TIME UP</span>}
-        </div>
-        {o.kind === 'answer' && !o.forgiven && o.matchedText && normalizeAnswer(o.matchedText) !== normalizeAnswer(o.text) && <div className="mt-1 text-[8px] text-slate-400">MATCHED: {o.matchedText}</div>}
-        <TriggerList triggers={result.triggers} />
-        {o.counter && <div className="mt-3 animate-pulse text-[10px] text-[#ef476f]">⚠ COUNTER-ATTACK TRIGGERED!</div>}
-        <div className="mt-4 text-base leading-relaxed sm:text-xl" style={{ color: tc, textShadow: '3px 3px 0 #000' }}>
-          {result.headline}
-        </div>
-        <div className="mt-2 text-[9px] leading-relaxed text-slate-200">{result.detail}</div>
-        <AnswerBoard prompt={prompt} used={used} highlightIdx={(o.kind === 'answer' && !o.forgiven) || o.kind === 'duplicate' ? o.idx : -1} />
-        <div className="mt-4 flex items-center justify-between gap-2">
-          <span className="text-[8px] text-slate-500">{autoMs ? 'AUTO-CONTINUE...' : 'PRESS ENTER'}</span>
-          <PixelButton onClick={onContinue}>CONTINUE ▶</PixelButton>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CenterOverlay({ children }) {
-  return <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 p-3 text-center">{children}</div>;
-}
-
-function IntroOverlay({ engine, teams, onStart, label }) {
-  useConfirmKey(onStart);
-  return (
-    <CenterOverlay>
-      <div className="max-w-md border-4 border-black bg-[#1b1736] p-4 shadow-[4px_4px_0_#000]">
-        <div className="text-2xl">{engine.icon}</div>
-        {label && <div className="mt-2 text-[8px] text-slate-400">{label}</div>}
-        <div className="mt-2 text-xs text-[#ffd23f] sm:text-sm">{engine.label}</div>
-        <div className="mt-2 text-[9px]">
-          <span style={{ color: inkFor(teams[0].primary) }}>{teams[0].name}</span> <span className="text-slate-500">VS</span> <span style={{ color: inkFor(teams[1].primary) }}>{teams[1].name}</span>
-        </div>
-        <p className="mt-3 hidden text-[8px] leading-relaxed text-slate-300 sm:block">{engine.blurb}</p>
-        <div className="mt-4">
-          <PixelButton onClick={onStart}>▶ START</PixelButton>
-        </div>
-      </div>
-    </CenterOverlay>
-  );
-}
-
-function HandoffOverlay({ team, onReady }) {
-  useConfirmKey(onReady);
-  return (
-    <CenterOverlay>
-      <div className="border-4 border-black bg-[#1b1736] p-4 shadow-[4px_4px_0_#000]">
-        <div className="text-[9px] text-slate-400">PASS THE DEVICE TO</div>
-        <div className="mt-3 text-sm sm:text-lg" style={{ color: inkFor(team.primary), textShadow: '3px 3px 0 #000' }}>
-          {team.name}
-        </div>
-        <div className="mt-4">
-          <PixelButton onClick={onReady}>READY ▶</PixelButton>
-        </div>
-      </div>
-    </CenterOverlay>
-  );
-}
-
-function BoxScore({ teams, engine, sportState, stats, onRematch, onExit, onCareerFinish }) {
-  const box = engine.boxScore(sportState);
-  const scores = engine.scores(sportState);
-  const winner = scores[0] === scores[1] ? null : scores[0] > scores[1] ? 0 : 1;
-  const statRows = [
-    ['CORRECT', (s) => `${s.correct}/${s.plays}`],
-    ['ULTRA-RARE (T5)', (s) => s.tiers[5]],
-    ['RARE (T4)', (s) => s.tiers[4]],
-    ['SOLID (T3)', (s) => s.tiers[3]],
-    ['COMMON (T1-2)', (s) => s.tiers[1] + s.tiers[2]],
-    ['AVG RARITY', (s) => (s.correct ? (s.tierSum / s.correct).toFixed(1) : '-')],
-    ['MISSES / TIME-UPS', (s) => `${s.invalid + s.dupes} / ${s.timeouts}`],
-    ['GOT COUNTERED', (s) => s.countered],
-    ['BEST ANSWER', (s) => (s.best ? `${s.best.text} (T${s.best.tier})` : '-')],
-  ];
-  const nameCell = (i) => (
-    <td className="whitespace-nowrap px-2 py-1 text-left" style={{ color: inkFor(teams[i].primary) }}>
-      {teams[i].name}
-    </td>
-  );
-  return (
-    <div className="border-4 border-t-0 border-black bg-[#1b1736] p-3">
-      <div className="text-center text-sm leading-relaxed sm:text-lg" style={{ color: '#ffd23f', textShadow: '3px 3px 0 #000' }}>
-        {winner === null ? "IT'S A DRAW!" : `${teams[winner].name} WIN!`}
-      </div>
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full border-2 border-black text-center text-[9px]">
-          <thead className="bg-black text-slate-400">
-            <tr>
-              <th className="px-2 py-1 text-left">TEAM</th>
-              {box.columns.map((c) => (
-                <th key={c} className="px-2 py-1">
-                  {c}
-                </th>
-              ))}
-              <th className="px-2 py-1 text-[#ffd23f]">FINAL</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[0, 1].map((i) => (
-              <tr key={i} className="border-t-2 border-black">
-                {nameCell(i)}
-                {box.rows[i].map((v, k) => (
-                  <td key={k} className="px-2 py-1 text-white">
-                    {v}
-                  </td>
-                ))}
-                <td className="px-2 py-1 text-[#ffd23f]">{scores[i]}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full border-2 border-black text-[8px] sm:text-[9px]">
-          <thead className="bg-black text-slate-400">
-            <tr>
-              <th className="px-2 py-1 text-left">TRIVIA STATS</th>
-              {nameCell(0)}
-              {nameCell(1)}
-            </tr>
-          </thead>
-          <tbody>
-            {statRows.map(([label, fn]) => (
-              <tr key={label} className="border-t border-black/60">
-                <td className="px-2 py-1 text-slate-400">{label}</td>
-                <td className="px-2 py-1 text-white">{fn(stats[0])}</td>
-                <td className="px-2 py-1 text-white">{fn(stats[1])}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="mt-4 flex flex-wrap justify-center gap-3">
-        {onCareerFinish ? (
-          <PixelButton onClick={() => onCareerFinish({ scores, stats: stats[0] })}>BACK TO CLUBHOUSE ▶</PixelButton>
-        ) : (
-          <>
-            <PixelButton onClick={onRematch}>↻ REMATCH</PixelButton>
-            <PixelButton onClick={onExit} color="#4cc9f0">
-              NEW SETUP
-            </PixelButton>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * One match. `career` (optional) = { mods: [m0, m1], cpuWeights, label, onFinish(result) }.
- * Mods come from each club's starting players' abilities.
- */
-function GameScreen({ setup, onExit, onRematch, career }) {
-  const engine = SPORT_ENGINES[setup.sport];
-  const teams = setup.teams;
-  const mods = useMemo(() => (career ? career.mods : [emptyMods(), emptyMods()]), [career]);
-  const G = useRef(null);
-  if (!G.current) {
-    G.current = createMatch(setup);
-    G.current.retries = [mods[0].retries, mods[1].retries];
-  }
-  const [, bump] = useReducer((x) => x + 1, 0);
-  const [phase, setPhase] = useState('intro'); // intro | handoff | prompt | cpu | animating | feedback | over
-  const [anim, setAnim] = useState(null);
-  const [toast, setToast] = useState(null);
-  const [forfeitArmed, setForfeitArmed] = useState(false);
-  const g = G.current;
-
-  const beginTurn = useCallback(() => {
-    const m = G.current;
-    setAnim(null);
-    if (engine.isOver(m.sport)) {
-      m.turn = null;
-      setPhase('over');
-      SOUND_ENGINE.play('whistle');
-      setTimeout(() => SOUND_ENGINE.play('cheer'), 500);
-      bump();
-      return;
-    }
-    const actor = engine.currentActor(m.sport);
-    const prompt = drawPrompt(m);
-    const M = mods[actor];
-    let hint = null;
-    if (!teams[actor].isCPU && M.hintChance > 0 && Math.random() < M.hintChance) {
-      const opts = prompt.answers.filter((a, idx) => a.tier >= 4 && !m.used.has(usedKey(prompt.id, idx)));
-      if (opts.length) {
-        const a = pick(opts);
-        hint = { text: a.text.slice(0, 2).toUpperCase() + a.text.slice(2).toUpperCase().replace(/[A-Z0-9]/g, '_'), tier: a.tier, src: M.src.hintChance };
-      }
-    }
-    m.turnId += 1;
-    m.turn = { id: m.turnId, actor, prompt, hint };
-    // 2P: hand the device over when control changes (but not mid-rally in tennis)
-    const midRally = setup.sport === 'tennis' && m.sport.rally.shots > 0;
-    if (teams[actor].isCPU) setPhase('cpu');
-    else if (setup.mode === '2p' && m.lastHumanActor !== actor && !midRally) setPhase('handoff');
-    else {
-      m.lastHumanActor = actor;
-      setPhase('prompt');
-    }
-    bump();
-  }, [engine, teams, setup.mode, setup.sport, mods]);
-
-  const resolveOutcome = useCallback(
-    (raw) => {
-      const m = G.current;
-      const turn = m.turn;
-      if (!turn) return;
-      const M = mods[turn.actor];
-      const O = mods[1 - turn.actor];
-      const triggers = [];
-      let outcome = { ...raw };
-      // --- ability effects on the answer itself
-      if ((outcome.kind === 'invalid' || outcome.kind === 'duplicate') && M.composure > 0 && Math.random() < M.composure) {
-        outcome = { kind: 'answer', tier: 2, text: outcome.text, matchedText: outcome.text, forgiven: true };
-        triggers.push(`COMPOSURE (${M.src.composure}): wrong answer forgiven, plays as a safe T2`);
-      }
-      if (outcome.kind === 'answer' && !outcome.forgiven) {
-        m.used.add(usedKey(turn.prompt.id, outcome.idx));
-        const sp = M.specialists[turn.prompt.category];
-        if (sp && outcome.tier < 5 && Math.random() < sp.chance) {
-          outcome.tier += 1;
-          triggers.push(`${turn.prompt.category} BRAIN (${sp.src}): upgraded to T${outcome.tier}`);
-        }
-        if (outcome.tier === 2 && M.clutch > 0 && Math.random() < M.clutch) {
-          outcome.tier = 3;
-          triggers.push(`CLUTCH GENE (${M.src.clutch}): T2 plays as T3`);
-        }
-      }
-      // --- counter-attack roll, bent by IRON DEFENSE / BALLHAWK
-      if (outcome.kind === 'answer') {
-        const base = outcome.forgiven ? 0 : GAME_CONFIG.counterAttackChance[outcome.tier] || 0;
-        const p = base > 0 ? clamp(base * (1 - M.shield) + O.ballhawk, 0, 0.98) : 0;
-        const r = Math.random();
-        outcome.counter = r < p;
-        if (!outcome.counter && M.shield > 0 && r < base) triggers.push(`IRON DEFENSE (${M.src.shield}) shut down a counter-attack`);
-        if (outcome.counter && O.ballhawk > 0 && r >= base * (1 - M.shield)) triggers.push(`BALLHAWK (${O.src.ballhawk}) read it and pounced!`);
-      }
-      recordStats(m.stats[turn.actor], m.stats[1 - turn.actor], outcome);
-      const res = engine.resolve(m.sport, outcome, turn.actor, teams, mods);
-      m.shownSport = m.sport; // scoreboard keeps pre-play numbers until the animation lands
-      m.sport = res.state;
-      m.result = { ...res, triggers: [...triggers, ...(res.triggers || [])], outcome, actor: turn.actor, prompt: turn.prompt, turnId: turn.id };
-      setAnim(res.anim);
-      setPhase('animating');
-      bump();
-    },
-    [engine, teams, mods]
-  );
-
-  const handleSubmit = useCallback(
-    (text) => {
-      const m = G.current;
-      const { prompt, actor } = m.turn;
-      const hit = matchAnswer(text, prompt);
-      let outcome;
-      if (!hit) outcome = { kind: 'invalid', text };
-      else if (m.used.has(usedKey(prompt.id, hit.idx))) outcome = { kind: 'duplicate', text, idx: hit.idx, tier: hit.answer.tier, matchedText: hit.answer.text };
-      else outcome = { kind: 'answer', text, idx: hit.idx, tier: hit.answer.tier, matchedText: hit.answer.text };
-      if (outcome.kind !== 'answer' && m.retries[actor] > 0) {
-        m.retries[actor] -= 1;
-        SOUND_ENGINE.play('wrong');
-        return `SECOND WIND (${mods[actor].src.retries}): "${text}" ${outcome.kind === 'duplicate' ? 'was already used' : "isn't on the board"}. Try again! (${m.retries[actor]} left)`;
-      }
-      SOUND_ENGINE.play(outcome.kind === 'answer' ? 'correct' : 'wrong');
-      resolveOutcome(outcome);
-      return undefined;
-    },
-    [resolveOutcome, mods]
-  );
-
-  const handleTimeout = useCallback(() => {
-    SOUND_ENGINE.play('buzzer');
-    resolveOutcome({ kind: 'timeout', text: '' });
-  }, [resolveOutcome]);
-
-  // CPU turn: think, then answer.
-  const turnId = g.turn ? g.turn.id : 0;
-  useEffect(() => {
-    if (phase !== 'cpu') return undefined;
-    const m = G.current;
-    const quickRally = setup.sport === 'tennis' && m.sport.rally && m.sport.rally.shots > 0;
-    const [lo, hi] = GAME_CONFIG.cpu.thinkMs;
-    const id = setTimeout(() => resolveOutcome(cpuAnswer(m.turn.prompt, m.used, setup.difficulty, career ? career.cpuWeights : null)), quickRally ? lo * 0.6 : rand(lo, hi));
-    return () => clearTimeout(id);
-  }, [phase, turnId, resolveOutcome, setup.difficulty, setup.sport, career]);
-
-  const handleAnimEnd = useCallback(() => {
-    const r = G.current.result;
-    if (!r) return;
-    if (r.quick) {
-      setToast({ id: r.turnId, text: [...r.triggers, r.toast].join(' · '), tone: r.tone });
-      beginTurn();
-    } else setPhase('feedback');
-  }, [beginTurn]);
-
-  useEffect(() => {
-    if (!toast) return undefined;
-    const id = setTimeout(() => setToast(null), 2200);
-    return () => clearTimeout(id);
-  }, [toast]);
-
-  const scene = engine.scene(g.sport);
-  const sceneKey = JSON.stringify(scene);
-  const timeline = useMemo(
-    () => (anim ? buildTimeline(anim, teams) : buildIdle(JSON.parse(sceneKey), teams)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [anim, sceneKey, teams]
-  );
-
-  const turn = g.turn;
-  const activeTeam = turn ? turn.actor : null;
-  const result = g.result;
-
-  return (
-    <div className="mx-auto w-full" style={{ maxWidth: 'max(min(100%, 560px), min(1500px, calc((100dvh - 330px) * 1.7778)))' }}>
-      <Scoreboard teams={teams} engine={engine} sportState={phase === 'animating' && g.shownSport ? g.shownSport : g.sport} activeTeam={phase === 'over' ? null : activeTeam} />
-      <div className="relative">
-        <GameCanvas timeline={timeline} onEnd={handleAnimEnd} />
-        {phase === 'intro' && (
-          <IntroOverlay
-            engine={engine}
-            teams={teams}
-            label={career ? career.label : null}
-            onStart={() => {
-              SOUND_ENGINE.unlock();
-              beginTurn();
-            }}
-          />
-        )}
-        {phase === 'handoff' && turn && (
-          <HandoffOverlay
-            team={teams[turn.actor]}
-            onReady={() => {
-              G.current.lastHumanActor = turn.actor;
-              setPhase('prompt');
-            }}
-          />
-        )}
-        {toast && (
-          <div key={toast.id} className="pointer-events-none absolute left-1/2 top-3 z-10 w-[90%] -translate-x-1/2 border-2 border-black bg-black/80 px-3 py-2 text-center text-[8px] leading-relaxed sm:text-[9px]" style={{ color: TONE_COLORS[toast.tone] || '#fff' }}>
-            {toast.text}
-          </div>
-        )}
-        {phase === 'over' && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="border-4 border-black bg-black/70 px-4 py-2 text-lg text-[#ffd23f] sm:text-3xl" style={{ textShadow: '3px 3px 0 #e63946' }}>
-              FINAL
-            </div>
-          </div>
-        )}
-      </div>
-
-      {phase === 'prompt' && turn && (
-        <PromptPanel
-          key={turn.id}
-          prompt={turn.prompt}
-          team={teams[turn.actor]}
-          seconds={GAME_CONFIG.timerSeconds + mods[turn.actor].extraTime}
-          bonusSeconds={mods[turn.actor].extraTime}
-          hint={turn.hint}
-          onSubmit={handleSubmit}
-          onTimeout={handleTimeout}
-        />
-      )}
-      {phase === 'cpu' && turn && <CpuPanel prompt={turn.prompt} team={teams[turn.actor]} />}
-      {(phase === 'animating' || phase === 'feedback' || phase === 'handoff' || phase === 'intro') && (
-        <div className="border-4 border-t-0 border-black bg-[#1b1736] p-3 text-center text-[9px] text-slate-400">
-          {phase === 'animating' && result ? `${teams[result.actor].name}: "${result.outcome.kind === 'timeout' ? 'TIME UP' : result.outcome.text}"` : phase === 'intro' ? 'PRESS START' : phase === 'handoff' ? 'GET READY...' : ' '}
-        </div>
-      )}
-      {phase === 'over' && <BoxScore teams={teams} engine={engine} sportState={g.sport} stats={g.stats} onRematch={onRematch} onExit={onExit} onCareerFinish={career ? career.onFinish : null} />}
-
-      {phase === 'feedback' && result && (
-        <FeedbackModal key={result.turnId} result={result} teams={teams} used={g.used} onContinue={beginTurn} autoMs={teams[result.actor].isCPU ? GAME_CONFIG.cpu.autoContinueMs : 0} />
-      )}
-
-      {phase !== 'over' && (
-        <div className="mt-3 flex justify-center gap-3">
-          {career ? (
-            <button
-              type="button"
-              onClick={() => (forfeitArmed ? career.onFinish({ forfeit: true }) : setForfeitArmed(true))}
-              onBlur={() => setForfeitArmed(false)}
-              className={`text-[8px] underline ${forfeitArmed ? 'text-[#ef476f]' : 'text-slate-500 hover:text-slate-300'}`}
-              style={FONT_STYLE}
-            >
-              {forfeitArmed ? 'CLICK AGAIN TO FORFEIT (COUNTS AS A LOSS)' : 'FORFEIT MATCH'}
-            </button>
-          ) : (
-            <button type="button" onClick={onExit} className="text-[8px] text-slate-500 underline hover:text-slate-300" style={FONT_STYLE}>
-              QUIT TO SETUP
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* --- CAREER HUB ------------------------------------------------------------- */
 const SPORT_ICON = { football: '🏈', tennis: '🎾', soccer: '⚽' };
 const KIND_COLOR = { TRIVIA: '#4cc9f0', RISK: '#06d6a0', STAT: '#f4a261', SPECIALIST: '#c77dff' };
 const FA_COLORS = { primary: '#8d99ae', secondary: '#edf2f4' };
@@ -3308,14 +4118,14 @@ function SmallBtn({ children, onClick, disabled, color = '#ffd23f', title }) {
   );
 }
 
-function PlayerCard({ p, colors, children, footer }) {
+function PlayerCard({ p, colors, children, footer, starter }) {
   const a = p.ability;
   const kind = ABILITIES[a.key].kind;
   const happy = p.morale >= CAREER_CONFIG.morale.unhappyBelow;
   return (
-    <div className="flex gap-3 border-4 border-black bg-[#1b1736] p-2 shadow-[3px_3px_0_#000]">
+    <div className={`flex gap-3 border-4 bg-[#1b1736] p-2 shadow-[3px_3px_0_#000] ${starter ? 'border-[#06d6a0]' : 'border-black'}`}>
       <div className="flex shrink-0 items-end self-start border-2 border-black bg-[#3d9140] px-1 pt-1">
-        <SpritePreview primary={colors.primary} secondary={colors.secondary} head={SPORT_ENGINES[p.sport].head} skin={p.skin} hair={p.hair} scale={4} />
+        <SpritePreview primary={colors.primary} secondary={colors.secondary} head={SPORT_INFO[p.sport].head} skin={p.skin} hair={p.hair} scale={4} />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
@@ -3323,8 +4133,8 @@ function PlayerCard({ p, colors, children, footer }) {
           <Stars n={p.stars} />
         </div>
         <div className="mt-1 text-[8px] text-slate-400">
-          {SPORT_ICON[p.sport]} {p.pos}
-          {p.starter && <span className="text-[#06d6a0]"> · STARTER</span>}
+          {SPORT_INFO[p.sport].icon} <span className="text-white">{p.pos}</span> · {ROLE_NAMES[p.pos]}
+          {starter && <span className="text-[#06d6a0]"> · STARTER</span>}
         </div>
         <div className="mt-2 text-[8px]" style={{ color: KIND_COLOR[kind] }}>
           ⚡ {abilityName(a)} <span className="text-slate-500">· {kind}</span>
@@ -3374,11 +4184,24 @@ function TeamBadge({ team, head = 'helmet', scale = 3 }) {
 }
 
 function MatchPreview({ sport, teams }) {
-  const timeline = useMemo(() => {
-    const scene = sport === 'football' ? { sport, offense: 0, yard: 20, toGo: 10 } : sport === 'tennis' ? { sport, hitter: 0, ys: [110, 110] } : { sport, kicker: 0 };
-    return buildIdle(scene, teams);
+  const ref = useRef(null);
+  useEffect(() => {
+    const ctx = ref.current.getContext('2d');
+    const S = createArcade({ sport, mode: '1p', difficulty: 'pro', teams: teams.map((t) => ({ ...t, isCPU: true, roster: t.roster || {} })) }, { mods: [emptyMods(), emptyMods()], cpu: () => ({ kind: 'answer', tier: 3 }), cpuSkill: 1 });
+    S.banner = null;
+    let raf;
+    const loop = (now) => {
+      try {
+        arcadeRender(ctx, S, now / 1000);
+      } catch (e) {
+        /* decorative */
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
   }, [sport, teams]);
-  return <GameCanvas timeline={timeline} onEnd={() => {}} />;
+  return <canvas ref={ref} width={CW} height={CH} className="block w-full border-4 border-black bg-black" style={{ imageRendering: 'pixelated', aspectRatio: '16 / 9' }} aria-hidden="true" />;
 }
 
 function SeasonCard({ career }) {
@@ -3465,28 +4288,24 @@ function SquadOverview({ career, onOpen }) {
         </button>
       }
     >
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {SPORT_IDS.map((sport) => {
-          const starters = activeFor(career, 0, sport);
-          const r = teamRating(career, 0, sport);
+          const missing = missingRoles(career, sport);
+          const filled = ROLES[sport].length - missing.length;
           return (
-            <button key={sport} type="button" onClick={onOpen} className="border-2 border-black bg-[#1b1736] p-3 text-left hover:bg-[#241f48]" style={FONT_STYLE}>
+            <button key={sport} type="button" onClick={onOpen} className={`border-2 p-3 text-left hover:bg-[#241f48] ${missing.length ? 'border-[#ef476f] bg-[#1b1736]' : 'border-[#06d6a0] bg-[#1b1736]'}`} style={FONT_STYLE}>
               <div className="flex items-center justify-between gap-2 text-[9px]">
                 <span className="text-white">
-                  {SPORT_ICON[sport]} {SPORT_ENGINES[sport].label.split(' ')[0]}
+                  {SPORT_INFO[sport].icon} {SPORT_INFO[sport].label}
                 </span>
                 <span className="text-slate-300">
-                  <StarIcon /> {r.toFixed(1)}
+                  <StarIcon /> {teamRating(career, 0, sport).toFixed(1)}
                 </span>
               </div>
-              <ul className="mt-2 flex flex-col gap-1">
-                {starters.map((p) => (
-                  <li key={p.id} className="truncate text-[7px] text-slate-300">
-                    <Stars n={p.stars} /> {p.name}
-                  </li>
-                ))}
-                {starters.length < CAREER_CONFIG.startersPerSport && <li className="text-[7px] text-[#ef476f]">{CAREER_CONFIG.startersPerSport - starters.length} EMPTY SLOT(S)</li>}
-              </ul>
+              <div className="mt-2 h-2 w-full border border-black bg-black">
+                <div className="h-full" style={{ width: `${(filled / ROLES[sport].length) * 100}%`, background: missing.length ? '#ef476f' : '#06d6a0' }} />
+              </div>
+              <div className={`mt-2 text-[7px] ${missing.length ? 'text-[#ef476f]' : 'text-[#06d6a0]'}`}>{missing.length ? `NEED: ${missing.join(', ')}` : `READY · ${filled}/${ROLES[sport].length} POSITIONS`}</div>
             </button>
           );
         })}
@@ -3495,7 +4314,7 @@ function SquadOverview({ career, onOpen }) {
   );
 }
 
-function HomeTab({ career, onPlay, act, setTab }) {
+function HomeTab({ career, onPlay, act, setTab, goMarket }) {
   const f = currentFixture(career);
   const rep = career.lastReport;
   return (
@@ -3504,7 +4323,7 @@ function HomeTab({ career, onPlay, act, setTab }) {
         {career.phase === 'offseason' ? (
           <OffseasonPanel career={career} act={act} />
         ) : f ? (
-          <NextFixture career={career} f={f} onPlay={onPlay} />
+          <NextFixture key={`${career.season}-${career.week}-${career.phase}`} career={career} f={f} onPlay={onPlay} goMarket={goMarket} />
         ) : (
           <Panel title="WAITING">
             <div className="text-[9px] text-slate-400">No fixture right now.</div>
@@ -3561,65 +4380,97 @@ function HomeTab({ career, onPlay, act, setTab }) {
   );
 }
 
-function NextFixture({ career, f, onPlay }) {
+function NextFixture({ career, f, onPlay, goMarket }) {
   const rivalIdx = f.home === 0 ? f.away : f.home;
   const rival = career.teams[rivalIdx];
   const club = career.teams[0];
-  const mine = activeFor(career, 0, f.sport);
-  const theirs = activeFor(career, rivalIdx, f.sport);
-  const myR = teamRating(career, 0, f.sport);
-  const theirR = teamRating(career, rivalIdx, f.sport);
-  const engine = SPORT_ENGINES[f.sport];
+  const firstReady = SPORT_IDS.find((s) => missingRoles(career, s).length === 0);
+  const [sport, setSport] = useState(firstReady || 'soccer');
+  const missing = missingRoles(career, sport);
+  const mine = activeFor(career, 0, sport);
+  const theirs = activeFor(career, rivalIdx, sport);
+  const myR = teamRating(career, 0, sport);
+  const theirR = teamRating(career, rivalIdx, sport);
+  const info = SPORT_INFO[sport];
   const label = career.phase === 'playoffs' ? f.label : `WEEK ${career.week + 1} OF ${seasonWeeks(career)}`;
   const previewTeams = useMemo(
     () => [
-      { name: club.name, primary: club.primary, secondary: club.secondary },
-      { name: rival.name, primary: rival.primary, secondary: rival.secondary },
+      { name: club.name, primary: club.primary, secondary: club.secondary, roster: rosterFor(career, 0, sport) },
+      { name: rival.name, primary: rival.primary, secondary: rival.secondary, roster: rosterFor(career, rivalIdx, sport) },
     ],
-    [club.name, club.primary, club.secondary, rival.name, rival.primary, rival.secondary]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [club.name, club.primary, club.secondary, rival.name, sport, career.lineups]
   );
-  const unit = (team, players, rating, isMine) => (
+  const unit = (team, players, rating) => (
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-2">
-        <TeamBadge team={team} head={engine.head} />
+        <TeamBadge team={team} head={info.head} />
         <div className="min-w-0">
           <div className="truncate text-[10px] sm:text-xs" style={{ color: inkFor(team.primary) }}>
             {team.name}
           </div>
           <div className="mt-1 text-[8px] text-slate-400">
-            UNIT <StarIcon /> {rating.toFixed(1)}
+            LINEUP <StarIcon /> {rating.toFixed(1)}
           </div>
         </div>
       </div>
       <ul className="mt-2 flex flex-col gap-1">
         {players.map((p) => (
-          <li key={p.id} className="text-[7px] leading-relaxed text-slate-300 sm:text-[8px]">
-            <Stars n={p.stars} /> {p.name} · <span style={{ color: KIND_COLOR[ABILITIES[p.ability.key].kind] }}>{abilityName(p.ability)}</span>
+          <li key={p.id} className="truncate text-[7px] leading-relaxed text-slate-300 sm:text-[8px]">
+            <span className="text-white">{p.pos}</span> <Stars n={p.stars} /> {p.name} · <span style={{ color: KIND_COLOR[ABILITIES[p.ability.key].kind] }}>{abilityName(p.ability)}</span>
           </li>
         ))}
-        {isMine && players.length < CAREER_CONFIG.startersPerSport && <li className="text-[7px] text-[#ef476f]">EMPTY STARTER SLOT: SET STARTERS IN ROSTER</li>}
       </ul>
     </div>
   );
   return (
-    <Panel title={`NEXT UP · ${label}`} right={`${engine.icon} ${engine.label}`}>
+    <Panel title={`NEXT UP · ${label} · VS ${rival.name}`} right="YOU PICK THE SPORT">
+      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {SPORT_IDS.map((s) => {
+          const miss = missingRoles(career, s);
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => {
+                SOUND_ENGINE.play('select');
+                setSport(s);
+              }}
+              className={`border-4 border-black px-2 py-2 text-left shadow-[3px_3px_0_#000] ${sport === s ? 'bg-[#ffd23f] text-black' : 'bg-[#1b1736] text-white'}`}
+              style={FONT_STYLE}
+            >
+              <div className="text-[10px]">
+                {SPORT_INFO[s].icon} {SPORT_INFO[s].label}
+              </div>
+              <div className={`mt-1 text-[7px] ${miss.length ? (sport === s ? 'text-[#a4133c]' : 'text-[#ef476f]') : sport === s ? 'text-[#05603f]' : 'text-[#06d6a0]'}`}>{miss.length ? `NEED ${miss.join(', ')}` : '✓ READY'}</div>
+            </button>
+          );
+        })}
+      </div>
       <div className="relative">
-        <MatchPreview sport={f.sport} teams={previewTeams} />
-        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
-          <span className="border-2 border-black bg-black/75 px-3 py-1 text-[9px] text-[#ffd23f] sm:text-xs">
-            {club.name} vs {rival.name}
-          </span>
-        </div>
+        <MatchPreview sport={sport} teams={previewTeams} />
+        {missing.length > 0 && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/70 p-3 text-center">
+            <div>
+              <div className="text-[10px] leading-relaxed text-[#ef476f] sm:text-sm">YOUR {info.label} LINEUP IS MISSING: {missing.join(', ')}</div>
+              <div className="mt-3">
+                <PixelButton onClick={() => goMarket(sport)} color="#ef476f">
+                  SIGN PLAYERS ▶
+                </PixelButton>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       <div className="mt-4 flex flex-col gap-4 sm:flex-row">
-        {unit(club, mine, myR, true)}
+        {unit(club, mine, myR)}
         <div className="self-center text-[10px] text-slate-500">VS</div>
-        {unit(rival, theirs, theirR, false)}
+        {unit(rival, theirs, theirR)}
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="text-[8px] leading-relaxed text-slate-400">{myR >= theirR + 0.4 ? "FAVOURITES. Don't get countered." : theirR >= myR + 0.4 ? 'UNDERDOGS. Go for the rare answers.' : 'EVEN MATCHUP.'}</div>
-        <PixelButton onClick={() => onPlay(f)} className="px-8 text-sm">
-          ▶ PLAY MATCH
+        <div className="text-[8px] leading-relaxed text-slate-400">{missing.length ? 'Fill every position to play this sport, or pick a sport you are ready for.' : myR >= theirR + 0.4 ? "FAVOURITES. Don't get countered." : theirR >= myR + 0.4 ? 'UNDERDOGS. Go for the rare answers.' : 'EVEN MATCHUP.'}</div>
+        <PixelButton onClick={() => onPlay(f, sport)} disabled={missing.length > 0} className="px-8 text-sm">
+          ▶ PLAY {info.label}
         </PixelButton>
       </div>
     </Panel>
@@ -3666,7 +4517,7 @@ function OffseasonPanel({ career, act }) {
   );
 }
 
-function RosterTab({ career, act }) {
+function RosterTab({ career, act, goMarket }) {
   const [confirm, setConfirm] = useState(null);
   const roster = teamPlayers(career, 0);
   const club = career.teams[0];
@@ -3674,52 +4525,85 @@ function RosterTab({ career, act }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="text-[8px] leading-relaxed text-slate-400">
-        {roster.length}/{CAREER_CONFIG.rosterMax} PLAYERS · WAGES {wages}c PER MATCH · ONLY STARTERS' ABILITIES ARE ACTIVE ({CAREER_CONFIG.startersPerSport} PER SPORT)
+        {roster.length}/{CAREER_CONFIG.rosterMax} PLAYERS · WAGES {wages}c PER MATCH · A SPORT IS ONLY PLAYABLE WHEN EVERY POSITION HAS A STARTER
       </div>
       {SPORT_IDS.map((sport) => {
-        const list = roster.filter((p) => p.sport === sport).sort((a, b) => Number(b.starter) - Number(a.starter) || b.stars - a.stars);
-        const starters = list.filter((p) => p.starter).length;
+        const lineup = lineupOf(career, sport);
+        const missing = missingRoles(career, sport);
+        const list = roster.filter((p) => p.sport === sport).sort((a, b) => ROLES[sport].indexOf(a.pos) - ROLES[sport].indexOf(b.pos) || b.stars - a.stars);
         return (
-          <Panel key={sport} title={`${SPORT_ICON[sport]} ${SPORT_ENGINES[sport].label.split(' ')[0]} UNIT`} right={
-              <span>
-                STARTERS {starters}/{CAREER_CONFIG.startersPerSport} · <StarIcon /> {teamRating(career, 0, sport).toFixed(1)}
+          <Panel
+            key={sport}
+            title={`${SPORT_INFO[sport].icon} ${SPORT_INFO[sport].label}`}
+            right={
+              <span className={missing.length ? 'text-[#ef476f]' : 'text-[#06d6a0]'}>
+                {missing.length ? `NEED ${missing.join(', ')}` : 'READY TO PLAY'} · <StarIcon /> {teamRating(career, 0, sport).toFixed(1)}
               </span>
-            }>
-            {list.length === 0 ? (
-              <div className="text-[8px] text-[#ef476f]">No {sport} players. Sign some in the MARKET or poach from LEAGUE rivals.</div>
-            ) : (
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {list.map((p) => (
-                  <PlayerCard
-                    key={p.id}
-                    p={p}
-                    colors={club}
-                    footer={
-                      <>
-                        <MoraleBar value={p.morale} />
-                        <span>
-                          {p.contract} SEASON{p.contract === 1 ? '' : 'S'} LEFT
-                        </span>
-                        <span>{p.salary}c/MATCH</span>
-                      </>
-                    }
-                  >
-                    <SmallBtn onClick={() => act((c) => toggleStarter(c, p.id))} color={p.starter ? '#8d99ae' : '#06d6a0'}>
-                      {p.starter ? 'BENCH' : 'START'}
-                    </SmallBtn>
-                    <SmallBtn
-                      color={confirm === p.id ? '#ef476f' : '#f4a261'}
-                      onClick={() => {
-                        if (confirm === p.id) {
-                          setConfirm(null);
-                          act((c) => sellPlayer(c, p.id));
-                        } else setConfirm(p.id);
-                      }}
+            }
+          >
+            <div className={`grid gap-2 ${ROLES[sport].length > 1 ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-1 sm:max-w-xs'}`}>
+              {ROLES[sport].map((role) => {
+                const p = lineup[role];
+                return (
+                  <div key={role} className={`border-2 p-2 ${p ? 'border-[#06d6a0] bg-[#06d6a0]/10' : 'border-dashed border-[#ef476f] bg-[#ef476f]/10'}`}>
+                    <div className="text-[8px] text-slate-400">
+                      {role} <span className="text-slate-600">{ROLE_NAMES[role]}</span>
+                    </div>
+                    {p ? (
+                      <div className="mt-1 flex items-center gap-2">
+                        <SpritePreview primary={club.primary} secondary={club.secondary} head={SPORT_INFO[sport].head} skin={p.skin} hair={p.hair} scale={2} />
+                        <div className="min-w-0">
+                          <div className="truncate text-[8px] text-white">{p.name}</div>
+                          <Stars n={p.stars} />
+                        </div>
+                      </div>
+                    ) : (
+                      <button type="button" onClick={() => goMarket(sport)} className="mt-1 text-[8px] text-[#ef476f] underline">
+                        EMPTY · SIGN ONE ▶
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {list.length > 0 && (
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {list.map((p) => {
+                  const starts = career.lineups[sport][p.pos] === p.id;
+                  const fee = Math.round(p.value * CAREER_CONFIG.sellRatio);
+                  return (
+                    <PlayerCard
+                      key={p.id}
+                      p={p}
+                      colors={club}
+                      starter={starts}
+                      footer={
+                        <>
+                          <MoraleBar value={p.morale} />
+                          <span>
+                            {p.contract} SEASON{p.contract === 1 ? '' : 'S'} LEFT
+                          </span>
+                          <span>{p.salary}c/MATCH</span>
+                        </>
+                      }
                     >
-                      {confirm === p.id ? `CONFIRM SELL +${Math.round(p.value * CAREER_CONFIG.sellRatio)}c` : `SELL ${Math.round(p.value * CAREER_CONFIG.sellRatio)}c`}
-                    </SmallBtn>
-                  </PlayerCard>
-                ))}
+                      <SmallBtn onClick={() => act((c) => toggleStarter(c, p.id))} color={starts ? '#8d99ae' : '#06d6a0'}>
+                        {starts ? 'BENCH' : `START AT ${p.pos}`}
+                      </SmallBtn>
+                      <SmallBtn
+                        color={confirm === p.id ? '#ef476f' : '#f4a261'}
+                        onClick={() => {
+                          if (confirm === p.id) {
+                            setConfirm(null);
+                            act((c) => sellPlayer(c, p.id));
+                          } else setConfirm(p.id);
+                        }}
+                      >
+                        {confirm === p.id ? `CONFIRM SELL +${fee}c` : `SELL ${fee}c`}
+                      </SmallBtn>
+                    </PlayerCard>
+                  );
+                })}
               </div>
             )}
           </Panel>
@@ -3729,25 +4613,40 @@ function RosterTab({ career, act }) {
   );
 }
 
-function MarketTab({ career, act }) {
+function MarketTab({ career, act, filter, setFilter }) {
   const full = career.teams[0].roster.length >= CAREER_CONFIG.rosterMax;
+  const needed = (p) => missingRoles(career, p.sport).includes(p.pos);
+  const list = career.freeAgents
+    .map((id) => career.players[id])
+    .filter((p) => (filter === 'all' ? true : filter === 'needed' ? needed(p) : p.sport === filter))
+    .sort((a, b) => Number(needed(b)) - Number(needed(a)) || b.stars - a.stars);
+  const chips = [['all', 'ALL'], ['needed', 'FILLS A GAP'], ...SPORT_IDS.map((s) => [s, `${SPORT_INFO[s].icon} ${SPORT_INFO[s].label}`])];
   return (
     <Panel title="FREE AGENT MARKET" right="NEW PLAYERS EVERY WEEK">
+      <div className="mb-3 flex flex-wrap gap-2">
+        {chips.map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setFilter(id)} className={`border-2 border-black px-2 py-1 text-[8px] shadow-[2px_2px_0_#000] ${filter === id ? 'bg-[#ffd23f] text-black' : 'bg-[#1b1736] text-white'}`} style={FONT_STYLE}>
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="mb-3 text-[8px] leading-relaxed text-slate-400">
         5-star players are rare and expensive. Everyone has a unique ability. {full && <span className="text-[#ef476f]">Your roster is full: sell someone first.</span>}
       </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {career.freeAgents
-          .map((id) => career.players[id])
-          .sort((a, b) => b.stars - a.stars)
-          .map((p) => (
+      {list.length === 0 ? (
+        <div className="text-[9px] text-slate-400">Nobody matches this filter this week. Try ALL, or check back after your next match.</div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {list.map((p) => (
             <PlayerCard key={p.id} p={p} colors={FA_COLORS} footer={<span>{p.salary}c/MATCH WAGES</span>}>
+              {needed(p) && <span className="border-2 border-black bg-[#ef476f] px-1 text-[8px] text-black">FILLS YOUR EMPTY {p.pos}</span>}
               <SmallBtn onClick={() => act((c) => buyPlayer(c, p.id))} disabled={full || career.coins < p.value}>
                 SIGN {p.value}c
               </SmallBtn>
             </PlayerCard>
           ))}
-      </div>
+        </div>
+      )}
     </Panel>
   );
 }
@@ -3834,6 +4733,7 @@ function ScheduleTab({ career }) {
   const rows = career.schedule.filter((f) => f.home === 0 || f.away === 0);
   const P = career.playoffs;
   const playoffRows = P ? [...P.semis, ...(P.final ? [P.final] : [])].filter((f) => f.home === 0 || f.away === 0) : [];
+  const next = currentFixture(career);
   const line = (f, label, key) => {
     const userHome = f.home === 0;
     const rival = career.teams[userHome ? f.away : f.home];
@@ -3842,28 +4742,27 @@ function ScheduleTab({ career }) {
       const [h, a] = f.result.scores;
       const us = userHome ? h : a;
       const them = userHome ? a : h;
-      const c = us > them ? '#06d6a0' : us < them ? '#ef476f' : '#ffd23f';
       res = (
-        <span style={{ color: c }}>
+        <span style={{ color: us > them ? '#06d6a0' : us < them ? '#ef476f' : '#ffd23f' }}>
           {us > them ? 'W' : us < them ? 'L' : 'T'} {us}-{them}
         </span>
       );
     }
-    const current = currentFixture(career) === f;
+    const current = next === f;
     return (
       <li key={key} className={`flex items-center justify-between gap-2 border-t border-black py-2 text-[8px] ${current ? 'text-[#ffd23f]' : 'text-slate-300'}`}>
         <span className="w-24 shrink-0 text-slate-500">{label}</span>
         <span className="min-w-0 flex-1 truncate">
-          {SPORT_ICON[f.sport]} {userHome ? 'vs' : '@'} {rival.name}
+          {f.sport ? SPORT_INFO[f.sport].icon : '🎲'} {userHome ? 'vs' : '@'} {rival.name}
         </span>
         <span className="shrink-0" style={{ fontVariantNumeric: 'tabular-nums' }}>
-          {current ? 'NEXT' : res}
+          {current ? 'NEXT · YOU PICK THE SPORT' : res}
         </span>
       </li>
     );
   };
   return (
-    <Panel title={`SEASON ${career.season} SCHEDULE`} right="SPORTS ROTATE EVERY WEEK">
+    <Panel title={`SEASON ${career.season} SCHEDULE`} right="YOU CHOOSE THE SPORT FOR EACH MATCH">
       <ul>
         {rows.map((f, i) => line(f, `WEEK ${f.week + 1}`, `r${i}`))}
         {playoffRows.map((f, i) => line(f, f.label, `p${i}`))}
@@ -3874,6 +4773,11 @@ function ScheduleTab({ career }) {
 
 function CareerHub({ career, setCareer, onPlay, onHelp }) {
   const [tab, setTab] = useState('home');
+  const [marketFilter, setMarketFilter] = useState('all');
+  const goMarket = (sport) => {
+    setMarketFilter(sport && missingRoles(career, sport).length ? 'needed' : 'all');
+    setTab('market');
+  };
   const [flash, setFlash] = useState(null);
   const club = career.teams[0];
   const st = standings(career);
@@ -3950,9 +4854,9 @@ function CareerHub({ career, setCareer, onPlay, onHelp }) {
           {flash.text}
         </div>
       )}
-      {tab === 'home' && <HomeTab career={career} onPlay={onPlay} act={act} setTab={setTab} />}
-      {tab === 'roster' && <RosterTab career={career} act={act} />}
-      {tab === 'market' && <MarketTab career={career} act={act} />}
+      {tab === 'home' && <HomeTab career={career} onPlay={onPlay} act={act} setTab={setTab} goMarket={goMarket} />}
+      {tab === 'roster' && <RosterTab career={career} act={act} goMarket={goMarket} />}
+      {tab === 'market' && <MarketTab career={career} act={act} filter={marketFilter} setFilter={setMarketFilter} />}
       {tab === 'league' && <LeagueTab career={career} act={act} />}
       {tab === 'schedule' && <ScheduleTab career={career} />}
     </div>
@@ -3970,11 +4874,11 @@ function NewCareerScreen({ hasSave, onCreate, onBack }) {
     onCreate({ ...club, name: club.name.trim() || 'MY CLUB' });
   };
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
+    <div className="m-auto flex w-full max-w-2xl flex-col gap-4">
       <h1 className="text-center text-lg leading-relaxed text-[#ffd23f] sm:text-2xl" style={{ textShadow: '3px 3px 0 #e63946, 6px 6px 0 #000' }}>
         FOUND YOUR CLUB
       </h1>
-      <p className="text-center text-[8px] leading-relaxed text-slate-400">One club, three sports. You start with a free 9-player squad. Win games, earn coins, sign stars.</p>
+      <p className="text-center text-[8px] leading-relaxed text-slate-400">One club, three sports. You start with a free squad that only covers some positions. Win games, earn coins, sign stars.</p>
       <TeamCard index={0} team={club} onChange={setClub} head="helmet" />
       <div className="flex flex-wrap justify-center gap-3">
         <PixelButton onClick={onBack} color="#8d99ae">
@@ -4038,7 +4942,7 @@ function MenuTile({ title, sub, color, onClick, big }) {
         SOUND_ENGINE.play('select');
         onClick();
       }}
-      className={`group flex w-full flex-col gap-2 border-4 border-black text-left text-black shadow-[6px_6px_0_#000] transition-transform hover:-translate-y-1 active:translate-x-[3px] active:translate-y-[3px] active:shadow-[3px_3px_0_#000] ${big ? 'px-6 py-6' : 'px-5 py-5'}`}
+      className={`group flex w-full flex-col gap-2 border-4 border-black text-left text-black shadow-[6px_6px_0_#000] transition-transform hover:-translate-y-1 active:translate-x-[3px] active:translate-y-[3px] active:shadow-[3px_3px_0_#000] ${big ? 'px-5 py-4 [@media(min-height:820px)]:px-6 [@media(min-height:820px)]:py-6' : 'px-5 py-3 [@media(min-height:820px)]:py-5'}`}
       style={{ background: color, ...FONT_STYLE }}
     >
       <span className={big ? 'text-base sm:text-2xl' : 'text-sm sm:text-lg'}>{title}</span>
@@ -4054,42 +4958,42 @@ function TitleScreen({ career, onContinue, onNew, onQuick, onTutorial }) {
     <div className="relative flex flex-1 flex-col overflow-hidden">
       <StadiumBackdrop />
       <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(13,11,30,0.82) 0%, rgba(13,11,30,0.55) 40%, rgba(13,11,30,0.9) 78%, #0d0b1e 100%)' }} />
-      <div style={GUTTER} className="relative z-10 flex flex-1 flex-col items-center justify-center gap-6 py-8 text-center sm:gap-8">
+      <div style={GUTTER} className="relative z-10 flex flex-1 flex-col items-center justify-center gap-4 py-4 text-center [@media(min-height:820px)]:gap-8 [@media(min-height:820px)]:py-8">
         <div>
-          <h1 className="text-[#ffd23f]" style={{ fontSize: 'clamp(2.4rem, 9vw, 8rem)', lineHeight: 1.05, textShadow: '0.06em 0.06em 0 #e63946, 0.12em 0.12em 0 #000' }}>
+          <h1 className="text-[#ffd23f]" style={{ fontSize: 'clamp(2rem, min(9vw, 11vh), 8rem)', lineHeight: 1.05, textShadow: '0.06em 0.06em 0 #e63946, 0.12em 0.12em 0 #000' }}>
             RETRO CLASH
           </h1>
-          <div className="mt-3 text-[#4cc9f0]" style={{ fontSize: 'clamp(1rem, 3.4vw, 2.6rem)', textShadow: '0.08em 0.08em 0 #000' }}>
+          <div className="mt-3 text-[#4cc9f0]" style={{ fontSize: 'clamp(0.9rem, min(3.4vw, 4.4vh), 2.6rem)', textShadow: '0.08em 0.08em 0 #000' }}>
             TRIVIA BOWL
           </div>
-          <p className="mx-auto mt-4 max-w-2xl text-[9px] leading-relaxed text-slate-200 sm:text-xs">Name the answer nobody else would. Rare answers score touchdowns, aces and top-bins goals. Obvious ones get intercepted.</p>
+          <p className="mx-auto mt-4 max-w-2xl text-[9px] leading-relaxed text-slate-200 sm:text-xs">Real-time arcade sports where every pass, shot and throw asks a trivia question. Name the answer nobody else would: rare answers score, obvious ones get intercepted.</p>
         </div>
         <div className="grid w-full max-w-4xl gap-4 sm:grid-cols-2">
           {career ? (
             <MenuTile big title={`▶ CONTINUE CAREER`} sub={`${career.teams[0].name} · SEASON ${career.season} · ${career.coins.toLocaleString()} COINS`} color="#ffd23f" onClick={onContinue} />
           ) : (
-            <MenuTile big title="▶ START A CAREER" sub="Found a club, sign players with unique abilities and chase the title across all 3 sports." color="#ffd23f" onClick={onNew} />
+            <MenuTile big title="▶ START A CAREER" sub="Found a club, fill every position, and chase the title across all 4 sports." color="#ffd23f" onClick={onNew} />
           )}
-          <MenuTile big title="QUICK MATCH" sub="One game. Pick a sport, colors and play vs the CPU or a friend on the same device." color="#c77dff" onClick={onQuick} />
+          <MenuTile big title="QUICK MATCH" sub="One real-time game. Pick any of the 4 sports and play the CPU or a friend on the same keyboard." color="#c77dff" onClick={onQuick} />
           {career && <MenuTile title="NEW CAREER" sub="Start over with a new club (replaces your current save)." color="#4cc9f0" onClick={onNew} />}
           <div className={career ? '' : 'sm:col-span-2'}>
-            <MenuTile title="? HOW TO PLAY" sub="Tiers, counter-attacks, all three sports, and how career mode works." color="#06d6a0" onClick={onTutorial} />
+            <MenuTile title="? HOW TO PLAY" sub="Controls, rarity tiers, counter-attacks, all four sports and career mode." color="#06d6a0" onClick={onTutorial} />
           </div>
         </div>
       </div>
-      <div style={GUTTER} className="relative z-10 grid gap-3 pb-6 sm:grid-cols-3">
-        {Object.values(SPORT_ENGINES).map((e) => (
+      <div style={GUTTER} className="relative z-10 grid gap-3 pb-4 sm:grid-cols-2 lg:grid-cols-4 [@media(max-height:700px)]:hidden">
+        {Object.values(SPORT_INFO).map((e) => (
           <div key={e.id} className="flex items-start gap-3 border-4 border-black bg-[#1b1736]/90 p-3 shadow-[4px_4px_0_#000]">
             <span className="text-2xl" aria-hidden="true">
               {e.icon}
             </span>
             <div className="min-w-0">
               <div className="text-[10px] text-[#ffd23f]">{e.label}</div>
-              <div className="mt-1 text-[8px] leading-relaxed text-slate-300">{e.blurb}</div>
+              <div className="mt-1 text-[8px] leading-relaxed text-slate-300 [@media(max-height:860px)]:hidden">{e.blurb}</div>
             </div>
           </div>
         ))}
-        <div className="text-center text-[8px] text-slate-400 sm:col-span-3" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        <div className="text-center text-[8px] text-slate-400 sm:col-span-2 lg:col-span-4" style={{ fontVariantNumeric: 'tabular-nums' }}>
           {TRIVIA_BANK.length} PROMPTS · {answerCount.toLocaleString()} RANKED ANSWERS · {categories} CATEGORIES · CAREER SAVES IN THIS BROWSER
         </div>
       </div>
@@ -4133,9 +5037,7 @@ function TutTable({ rows, head }) {
 
 function tutorialPages() {
   const C = GAME_CONFIG;
-  const F = C.football;
-  const T = C.tennis;
-  const S = C.soccer;
+  const A = C.arcade;
   const CC = CAREER_CONFIG;
   const cut = [0, ...RARITY_CUTOFFS, 1];
   const sample = TRIVIA_BANK.find((p) => p.id === 'us-states') || TRIVIA_BANK[0];
@@ -4146,18 +5048,21 @@ function tutorialPages() {
       .map((a) => a.text)
       .join(', ');
   const chip = (t) => <TierChip tier={t} small />;
+  const answers = TRIVIA_BANK.reduce((s, p) => s + p.answers.length, 0);
   return [
     {
       title: 'WELCOME TO RETRO CLASH',
       body: (
         <>
-          <p>Every play starts with a survey-style prompt, like "{sample.prompt}". Type any answer that's on the board before the {C.timerSeconds}-second clock runs out.</p>
+          <p>It's a real-time arcade sports game where trivia powers every big play. Move your player with WASD (or the arrow keys).</p>
           <p>
-            <span className="text-[#ffd23f]">The rarer your answer, the bigger the play.</span> Name what everybody says and you'll barely move the ball. Name a deep cut and you score.
+            <span className="text-[#ffd23f]">When you pass, shoot, throw or hit, the game freezes and asks you a question</span>, like "{sample.prompt}". You have {C.timerSeconds} seconds to type an answer that's on the board.
           </p>
+          <p>The rarer your answer, the better the play. The CPU never waits: it acts instantly.</p>
           <div className="flex items-end justify-center gap-4 border-4 border-black bg-[#3d9140] px-4 pt-3">
             <SpritePreview primary="#e63946" secondary="#fcbf49" head="helmet" pose="armsUp" />
             <SpritePreview primary="#457b9d" secondary="#f1faee" head="hair" pose="run1" skin="#8d5524" hair="#1a1a1a" />
+            <SpritePreview primary="#ff7b00" secondary="#1d3557" head="hair" pose="run2" skin="#c68642" hair="#3b2414" />
             <SpritePreview primary="#06d6a0" secondary="#1d3557" head="hair" pose="stand" skin="#ffdbac" hair="#d9a441" />
           </div>
         </>
@@ -4167,12 +5072,14 @@ function tutorialPages() {
       title: 'RARITY TIERS',
       body: (
         <>
-          <p>Each prompt lists every valid answer in order from most common to rarest. Each answer's tier comes from its place in that list:</p>
+          <p>
+            The bank has {TRIVIA_BANK.length} prompts and {answers.toLocaleString()} answers. Each prompt lists every valid answer from most common to rarest, and the tier comes from where an answer sits on that list:
+          </p>
           <TutTable
             head={['TIER', 'WHERE IT RANKS', `EXAMPLE: ${sample.prompt.toUpperCase()}`]}
             rows={[5, 4, 3, 2, 1].map((t) => [chip(t), t === 1 ? `Top ${pctOf(cut[1])} most common` : t === 5 ? `Rarest ${pctOf(1 - cut[4])}` : `${pctOf(cut[t - 1])}-${pctOf(cut[t])} down the list`, ex(t)])}
           />
-          <p className="text-slate-400">Typing is forgiving: case, accents, punctuation, "the", plurals and small typos are all fine. Nicknames work too (e.g. "Niners", "Philly", "JFK").</p>
+          <p className="text-slate-400">Typing is forgiving: case, accents, punctuation, "the", plurals and small typos are fine. Nicknames work too ("Niners", "JFK").</p>
         </>
       ),
     },
@@ -4180,119 +5087,124 @@ function tutorialPages() {
       title: 'THE RISK: COUNTER-ATTACKS',
       body: (
         <>
-          <p>Obvious answers are dangerous. When you give one, the other team gets a chance to punish you:</p>
           <TutTable
             head={['ANSWER', 'COUNTER CHANCE', 'WHAT HAPPENS']}
             rows={[
-              [chip(1), pctOf(C.counterAttackChance[1]), 'Pick-six, unreturnable smash, or the keeper steals it for a breakaway goal'],
+              [chip(1), pctOf(C.counterAttackChance[1]), 'Interception, blocked shot, keeper launches a counter, or the rival smashes your sitter'],
               [chip(2), pctOf(C.counterAttackChance[2]), 'Same, just less likely'],
               [chip(3), '0%', 'Safe, steady play'],
-              ['WRONG / REPEAT', '-', 'Sack, unforced error, or a shot off target. Answers already used this game count as wrong.'],
-              ['TIME RUNS OUT', '-', 'Fumble (turnover), "too slow" error, or a shanked shot'],
+              ['WRONG / REPEAT', '-', 'Misplaced pass, airball, wide shot, incomplete throw, unforced error'],
+              ['TIME RUNS OUT', '-', 'Same as wrong. In football you get sacked.'],
             ]}
           />
-          <p className="text-[#ffd23f]">Tip: a SOLID (T3) answer is always safe. Only go for the rarest ones when you're sure.</p>
+          <p className="text-[#ffd23f]">Tip: think of the 2nd or 3rd answer that comes to mind. The first one everyone thinks of is a T1.</p>
         </>
       ),
     },
     {
-      title: '🏈 FOOTBALL DRIVE',
+      title: '⚽ SOCCER · 🏀 BASKETBALL',
+      body: (
+        <>
+          <p>5-on-5. You control the player with the yellow arrow. When you pass, control jumps to the player who receives it.</p>
+          <TutTable
+            head={['KEY', 'WITH THE BALL', 'WITHOUT IT']}
+            rows={[
+              ['WASD', 'Dribble', 'Run / chase'],
+              ['SPACE', 'Pass to the circled teammate (question)', 'Tackle / steal'],
+              ['SHIFT', 'Shoot (question)', 'Switch to the teammate nearest the ball'],
+            ]}
+          />
+          <TutTable
+            head={['ANSWER', 'PASS', 'SHOT']}
+            rows={[
+              [chip(5), 'Perfect: cannot be intercepted', `Top bins / swish (keeper save ${pctOf(A.soccerSave[5])}, make ${pctOf(A.basketMake[5])})`],
+              [chip(4), 'Sharp: cannot be intercepted', `Save ${pctOf(A.soccerSave[4])} · make ${pctOf(A.basketMake[4])}`],
+              [chip(3), 'Normal speed', `Save ${pctOf(A.soccerSave[3])} · make ${pctOf(A.basketMake[3])}`],
+              ['T1-T2', 'Slow, and can be intercepted outright', `Save ${pctOf(A.soccerSave[1])} · make ${pctOf(A.basketMake[1])} (+ block risk)`],
+            ]}
+          />
+          <p className="text-slate-400">Long shots are harder. Basketball shots from outside the arc are worth 3. Each match lasts {Math.round(A.soccerSeconds / 60 * 10) / 10} minutes of game time; the clock stops during questions.</p>
+        </>
+      ),
+    },
+    {
+      title: '🏈 FOOTBALL',
       body: (
         <>
           <p>
-            You start at your own {F.startYard} and get 4 downs to gain {F.firstDownYards} yards. Teams swap drives; each team gets {F.drivesPerTeam} drives, with overtime if tied.
+            5-on-5, one play at a time. Start at your own {C.football.startYard} with 4 downs to gain {C.football.firstDownYards} yards. Each team gets {A.footballDrives} drives.
           </p>
           <TutTable
-            head={['ANSWER', 'RESULT']}
+            head={['KEY', 'ON OFFENSE', 'ON DEFENSE']}
             rows={[
-              [chip(5), 'Touchdown from anywhere (+7)'],
-              [chip(4), `+${F.yardsByTier[4]} yard diving catch`],
-              [chip(3), `+${F.yardsByTier[3]} yard completion`],
-              [chip(2), `+${F.yardsByTier[2]} yard run, or a PICK SIX if countered`],
-              [chip(1), `+${F.yardsByTier[1]} yard run, or a PICK SIX if countered`],
-              ['WRONG', `Sacked for -${F.sackYards} yards (safety if in your end zone)`],
-              ['TIME UP', 'Fumble: turnover'],
+              ['SPACE', 'Hike, then throw to the circled receiver (question)', '-'],
+              ['WASD', 'Scramble as the QB, run after the catch', 'Chase and touch the ball carrier to tackle'],
+              ['SHIFT', 'Hand off to the running back', 'Switch defender'],
+            ]}
+          />
+          <TutTable
+            head={['THROW', 'RESULT']}
+            rows={[
+              [chip(5), `Catch ${pctOf(A.throwCatch[5])}, in stride`],
+              [chip(4), `Catch ${pctOf(A.throwCatch[4])}`],
+              [chip(3), `Catch ${pctOf(A.throwCatch[3])} (less if covered)`],
+              ['T1-T2', 'Often dropped, and can be INTERCEPTED'],
+              ['TIME UP', 'Sacked'],
             ]}
           />
         </>
       ),
     },
     {
-      title: '🎾 TENNIS TIEBREAK',
+      title: '🎾 TENNIS',
       body: (
         <>
           <p>
-            First to {T.pointsToWin} points, win by {T.winBy}. Every answer is a shot, and the rally goes back and forth until someone wins the point.
+            Tiebreak: first to {C.tennis.pointsToWin}, win by {C.tennis.winBy}. Run to where the ball is going with WASD. When you reach it after the bounce, the game asks a question and your answer is the shot.
           </p>
           <TutTable
-            head={['ANSWER', 'RESULT']}
+            head={['ANSWER', 'SHOT']}
             rows={[
-              [chip(5), 'Ace on serve, clean winner in a rally'],
-              [chip(4), `Corner winner (${pctOf(T.deepRetrieveChance)} chance they chase it down; then THEY need T3+ or lose the point)`],
-              [chip(3), 'Good return: the rally continues'],
-              ['T1-T2', 'Weak return that can get SMASHED back for a lost point'],
-              ['WRONG / TIME UP', 'Unforced error or double fault'],
+              [chip(5), 'Ace / clean winner the rival can\'t reach'],
+              [chip(4), 'Deep corner: hard to chase down'],
+              [chip(3), 'Solid return: the rally continues'],
+              ['T1-T2', 'Weak ball. If countered, the rival SMASHES it past you'],
+              ['WRONG / TIME UP', 'Net, out, or double fault'],
             ]}
           />
-        </>
-      ),
-    },
-    {
-      title: '⚽ SOCCER SHOOTOUT',
-      body: (
-        <>
-          <p>{S.rounds} penalties each, then sudden death. Your answer sets the power and placement of your shot against a diving keeper.</p>
-          <TutTable
-            head={['ANSWER', 'SHOT', 'SAVE CHANCE']}
-            rows={[
-              [chip(5), 'Top-bins rocket', pctOf(S.shots[5].save)],
-              [chip(4), 'Driven into the corner', pctOf(S.shots[4].save)],
-              [chip(3), 'Placed side-foot', pctOf(S.shots[3].save)],
-              [chip(2), 'Weak, central', `${pctOf(S.shots[2].save)} + steal risk`],
-              [chip(1), 'Tame roller', `${pctOf(S.shots[1].save)} + steal risk`],
-              ['WRONG / TIME UP', 'Wide or over the bar', '-'],
-            ]}
-          />
-          <p className="text-slate-400">A counter-attack here means the keeper catches it and launches a breakaway: the other team gets a bonus goal.</p>
+          <p className="text-slate-400">Press SPACE to serve when it's your serve. If the ball bounces twice on your side, you lose the point.</p>
         </>
       ),
     },
     {
       title: 'CAREER MODE',
       body: (
-        <>
-          <p>You run one club across all three sports in an 8-team league.</p>
-          <TutTable
-            rows={[
-              ['SEASON', `${CC.rivals.length} regular-season weeks (you play every rival once). The sport changes every week.`],
-              ['PLAYOFFS', 'The top 4 go to the semifinals, then the championship.'],
-              ['COINS', `Win +${CC.rewards.win}, draw +${CC.rewards.draw}, loss +${CC.rewards.loss}. Every T5 answer +${CC.rewards.tier5}, every T4 +${CC.rewards.tier4}. Playoff win +${CC.rewards.playoffWin}, title +${CC.rewards.title}.`],
-              ['WAGES', 'Every player is paid after every match. If you can\'t pay, morale crashes.'],
-              ['RIVALS', 'Rival clubs sign better players every season, so keep upgrading.'],
-            ]}
-          />
-          <p className="text-slate-400">The CLUBHOUSE has five tabs: HOME (next match + news), ROSTER, MARKET, LEAGUE (standings + scouting) and SCHEDULE.</p>
-        </>
+        <TutTable
+          rows={[
+            ['YOUR CLUB', 'One club plays all four sports in an 8-team league.'],
+            ['PICK THE SPORT', 'Before every match you choose which sport to play, from the sports your lineup is ready for.'],
+            ['FULL LINEUPS', `Every sport has positions (soccer GK/DEF/MID/WING/ST, basketball PG/SG/SF/PF/C, football QB/RB/WR/TE/OL, tennis SINGLES). You can only play a sport when every position has a starter. Your free squad doesn't cover them all, so you have to buy the rest.`],
+            ['SEASON', `${CC.rivals.length} weeks, then the top 4 play semifinals and a championship.`],
+            ['COINS', `Win +${CC.rewards.win}, draw +${CC.rewards.draw}, loss +${CC.rewards.loss}. Every T5 answer +${CC.rewards.tier5}, every T4 +${CC.rewards.tier4}. Title +${CC.rewards.title}.`],
+            ['WAGES', "Every player is paid after every match. If you can't pay, morale crashes."],
+          ]}
+        />
       ),
     },
     {
       title: 'YOUR PLAYERS',
       body: (
         <>
-          <p>
-            Players are rated 1-5 stars. 5-star players are rare ({pctOf(CC.stars[5].weight / Object.values(CC.stars).reduce((s, x) => s + x.weight, 0))} of the market) and expensive. Each one plays a single sport and has their own
-            ability. Only your {CC.startersPerSport} STARTERS per sport use their abilities in a match.
-          </p>
+          <p>Players are rated 1-5 stars (5-star players are rare and pricey). Each one plays one position in one sport and has their own ability. Only starters' abilities count, and the players you see on the field are your actual starters.</p>
           <TutTable
             head={['TYPE', 'EXAMPLES']}
             rows={[
               [<span style={{ color: KIND_COLOR.TRIVIA }}>TRIVIA</span>, 'CLOCK MANAGER (+seconds), FILM STUDY (hint for a rare answer), SECOND WIND (retry a wrong answer)'],
               [<span style={{ color: KIND_COLOR.RISK }}>RISK</span>, 'IRON DEFENSE (fewer counters vs you), BALLHAWK (more counters vs them), CLUTCH GENE (T2 plays as T3), COMPOSURE (wrong answer forgiven)'],
-              [<span style={{ color: KIND_COLOR.STAT }}>STAT</span>, 'BULLDOZER (+yards), BIG SERVE (SOLID shots become winners), FINISHER (beats the keeper)'],
+              [<span style={{ color: KIND_COLOR.STAT }}>STAT</span>, 'WHEELS (faster runner), BULLDOZER (breaks tackles), SHARPSHOOTER (+make %), FINISHER (beats the keeper), BIG SERVE (SOLID shots become winners)'],
               [<span style={{ color: KIND_COLOR.SPECIALIST }}>SPECIALIST</span>, 'e.g. GEOGRAPHY BRAIN: answers in that category can jump up a tier'],
             ]}
           />
-          <p className="text-slate-400">When an ability fires during a match, a ⚡ line names the player who did it.</p>
         </>
       ),
     },
@@ -4301,25 +5213,27 @@ function tutorialPages() {
       body: (
         <TutTable
           rows={[
-            ['MARKET', `${CC.freeAgentsPerWeek} new free agents every week. Pay their fee to sign them.`],
-            ['POACH', 'Scout a rival in LEAGUE and make a LOWBALL, FAIR or BLOCKBUSTER offer. Bigger offers are more likely to be accepted. Players who refuse won\'t talk again until next week.'],
-            ['SELL', `Sell any player for ${pctOf(CC.sellRatio)} of their value, including your free starters.`],
-            ['MORALE', `Wins and starting raise it; losses, the bench and unpaid wages lower it. Below ${CC.morale.unhappyBelow}, a player's ability switches OFF and they won't re-sign.`],
-            ['CONTRACTS', 'When a contract ends you can re-sign the player in the off-season or let them walk. Happy players can gain a star between seasons.'],
+            ['MARKET', `${CC.freeAgentsPerWeek}+ new free agents every week, always including cheap options for positions you're missing. Use the FILLS A GAP filter.`],
+            ['POACH', "Scout a rival in LEAGUE and make a LOWBALL, FAIR or BLOCKBUSTER offer. Players who refuse won't talk again until next week."],
+            ['SELL', `Sell any player for ${pctOf(CC.sellRatio)} of their value. Selling a starter leaves that position empty.`],
+            ['MORALE', `Wins and starting raise it; losses, the bench and unpaid wages lower it. Below ${CC.morale.unhappyBelow}, a player's ability switches OFF.`],
+            ['CONTRACTS', 'Re-sign expiring players in the off-season or let them walk. Happy players can gain a star between seasons.'],
           ]}
         />
       ),
     },
     {
-      title: 'CONTROLS & TIPS',
+      title: 'CONTROLS',
       body: (
         <TutTable
           rows={[
-            ['ENTER', 'Submit an answer, continue after a play, start a match'],
-            ['SOUND', 'Toggle in the top bar'],
-            ['2 PLAYERS', 'In QUICK MATCH, choose 2P PASS & PLAY and hand the device over when it asks'],
-            ['SAVING', 'Career progress saves automatically in this browser'],
-            ['STRATEGY', 'Think of the 2nd or 3rd answer that comes to mind, not the 1st. The first thing everyone thinks of is a T1.'],
+            ['WASD / ARROWS', 'Move'],
+            ['SPACE (or J)', 'Pass, throw, hike, serve, tackle, steal'],
+            ['SHIFT (or K)', 'Shoot, hand off, switch player'],
+            ['ENTER', 'Submit an answer, start a match'],
+            ['ESC / P', 'Pause'],
+            ['2 PLAYERS', 'Quick match only: P1 WASD + F/G, P2 arrows + K/L'],
+            ['PHONE / TABLET', 'On-screen joystick and buttons appear automatically'],
           ]}
         />
       ),
@@ -4384,6 +5298,704 @@ function Tutorial({ onClose }) {
   );
 }
 
+function emptyLineups() {
+  const l = {};
+  SPORT_IDS.forEach((s) => {
+    l[s] = {};
+    ROLES[s].forEach((r) => (l[s][r] = null));
+  });
+  return l;
+}
+
+/** { role: player|null } for the user's lineup in a sport. */
+export function lineupOf(c, sport) {
+  const out = {};
+  ROLES[sport].forEach((r) => {
+    const id = c.lineups[sport][r];
+    out[r] = id && c.players[id] ? c.players[id] : null;
+  });
+  return out;
+}
+
+export function missingRoles(c, sport) {
+  return ROLES[sport].filter((r) => !c.lineups[sport][r] || !c.players[c.lineups[sport][r]]);
+}
+
+/** Lineup keyed by role for team i (rivals use their best player per role). */
+export function rosterFor(c, i, sport) {
+  if (i === 0) return lineupOf(c, sport);
+  const out = {};
+  ROLES[sport].forEach((r) => {
+    const opts = teamPlayers(c, i).filter((p) => p.sport === sport && p.pos === r).sort((a, b) => b.stars - a.stars);
+    out[r] = opts[0] || null;
+  });
+  return out;
+}
+
+function removeFromLineup(c, id) {
+  SPORT_IDS.forEach((s) =>
+    ROLES[s].forEach((r) => {
+      if (c.lineups[s][r] === id) c.lineups[s][r] = null;
+    })
+  );
+}
+
+/** v1 saves (3 sports, free-form positions) -> v2 (4 sports, fixed roles + lineups). */
+function migrateCareer(c) {
+  if (!c || c.version === 2) return c;
+  if (c.version !== 1) return null;
+  c.version = 2;
+  c.lineups = emptyLineups();
+  Object.values(c.players).forEach((p) => {
+    if (!ROLES[p.sport].includes(p.pos)) p.pos = pick(ROLES[p.sport]);
+    if (p.ability && p.ability.key === 'power' && p.ability.mag > 1) p.ability.mag = Math.round((p.ability.mag / 20) * 100) / 100;
+    delete p.starter;
+  });
+  c.teams.forEach((t, i) => {
+    if (i === 0) return;
+    SPORT_IDS.forEach((sport) =>
+      ROLES[sport].forEach((role) => {
+        if (!t.roster.some((id) => c.players[id].sport === sport && c.players[id].pos === role)) t.roster.push(makePlayer(c, rivalStar(CAREER_CONFIG.rivalStarsMean + (c.season - 1) * CAREER_CONFIG.rivalStarsPerSeason), sport, role).id);
+      })
+    );
+  });
+  teamPlayers(c, 0)
+    .sort((a, b) => b.stars - a.stars)
+    .forEach((p) => {
+      if (!c.lineups[p.sport][p.pos]) c.lineups[p.sport][p.pos] = p.id;
+    });
+  c.schedule.forEach((f) => {
+    if (!f.result) f.sport = null;
+  });
+  addNews(c, 'UPDATE: matches are now real-time, basketball joined the league, and every sport has positions to fill.');
+  return c;
+}
+
+/** Shared answer pipeline for humans and CPU: abilities, counter roll, stats. */
+function finalizeOutcome(m, mods, team, prompt, raw) {
+  const M = mods[team];
+  const O = mods[1 - team];
+  const triggers = [];
+  let o = { ...raw };
+  if ((o.kind === 'invalid' || o.kind === 'duplicate') && M.composure > 0 && Math.random() < M.composure) {
+    o = { kind: 'answer', tier: 2, text: o.text, matchedText: o.text, forgiven: true };
+    triggers.push(`COMPOSURE (${M.src.composure}): wrong answer forgiven, plays as a safe T2`);
+  }
+  if (o.kind === 'answer' && !o.forgiven) {
+    if (o.idx != null) m.used.add(usedKey(prompt.id, o.idx));
+    const sp = M.specialists[prompt.category];
+    if (sp && o.tier < 5 && Math.random() < sp.chance) {
+      o.tier += 1;
+      triggers.push(`${prompt.category} BRAIN (${sp.src}): upgraded to T${o.tier}`);
+    }
+    if (o.tier === 2 && M.clutch > 0 && Math.random() < M.clutch) {
+      o.tier = 3;
+      triggers.push(`CLUTCH GENE (${M.src.clutch}): T2 plays as T3`);
+    }
+  }
+  if (o.kind === 'answer') {
+    const base = o.forgiven ? 0 : GAME_CONFIG.counterAttackChance[o.tier] || 0;
+    const p = base > 0 ? clamp(base * (1 - M.shield) + O.ballhawk, 0, 0.98) : 0;
+    const r = Math.random();
+    o.counter = r < p;
+    if (!o.counter && M.shield > 0 && r < base) triggers.push(`IRON DEFENSE (${M.src.shield}) shut down a counter-attack`);
+    if (o.counter && O.ballhawk > 0 && r >= base * (1 - M.shield)) triggers.push(`BALLHAWK (${O.src.ballhawk}) read it and pounced!`);
+  }
+  recordStats(m.stats[team], m.stats[1 - team], o);
+  return { outcome: o, triggers };
+}
+
+const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyJ', 'KeyK', 'KeyF', 'KeyG', 'KeyL', 'ShiftLeft', 'ShiftRight']);
+const P1_ACTION = ['Space', 'KeyJ', 'KeyF'];
+const P1_SECOND = ['ShiftLeft', 'ShiftRight', 'KeyK', 'KeyG'];
+
+/** Keyboard + touch input. 1P: WASD/arrows, SPACE/J action, SHIFT/K secondary. 2P: P1 WASD+F/G, P2 arrows+K/L. */
+function useArcadeInput(twoPlayer) {
+  const keys = useRef(new Set());
+  const edges = useRef({ a0: false, b0: false, a1: false, b1: false });
+  const touch = useRef({ mx: 0, my: 0 });
+  useEffect(() => {
+    const typing = (e) => e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
+    const down = (e) => {
+      if (typing(e)) return;
+      if (GAME_KEYS.has(e.code)) e.preventDefault();
+      if (e.repeat) return;
+      keys.current.add(e.code);
+      const E = edges.current;
+      if (twoPlayer) {
+        if (e.code === 'KeyF' || e.code === 'Space') E.a0 = true;
+        if (e.code === 'KeyG') E.b0 = true;
+        if (e.code === 'KeyK') E.a1 = true;
+        if (e.code === 'KeyL') E.b1 = true;
+      } else {
+        if (P1_ACTION.includes(e.code)) E.a0 = true;
+        if (P1_SECOND.includes(e.code)) E.b0 = true;
+      }
+    };
+    const up = (e) => keys.current.delete(e.code);
+    const blur = () => keys.current.clear();
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
+  }, [twoPlayer]);
+  const read = useCallback(() => {
+    const k = keys.current;
+    const E = edges.current;
+    const axis = (neg, pos) => (k.has(pos) ? 1 : 0) - (k.has(neg) ? 1 : 0);
+    let p0;
+    let p1 = { mx: 0, my: 0 };
+    if (twoPlayer) {
+      p0 = { mx: axis('KeyA', 'KeyD'), my: axis('KeyW', 'KeyS') };
+      p1 = { mx: axis('ArrowLeft', 'ArrowRight'), my: axis('ArrowUp', 'ArrowDown') };
+    } else {
+      p0 = {
+        mx: clamp(axis('KeyA', 'KeyD') + axis('ArrowLeft', 'ArrowRight') + touch.current.mx, -1, 1),
+        my: clamp(axis('KeyW', 'KeyS') + axis('ArrowUp', 'ArrowDown') + touch.current.my, -1, 1),
+      };
+    }
+    const out = [
+      { ...p0, action: E.a0, secondary: E.b0 },
+      { ...p1, action: E.a1, secondary: E.b1 },
+    ];
+    E.a0 = false;
+    E.b0 = false;
+    E.a1 = false;
+    E.b1 = false;
+    return out;
+  }, [twoPlayer]);
+  const press = useCallback((which) => {
+    edges.current[which] = true;
+  }, []);
+  const clear = useCallback(() => {
+    keys.current.clear();
+    Object.keys(edges.current).forEach((k) => (edges.current[k] = false));
+  }, []);
+  return useMemo(() => ({ read, press, touch, clear }), [read, press, clear]);
+}
+
+function TouchControls({ input, sport }) {
+  const [show] = useState(() => {
+    try {
+      return window.matchMedia('(pointer: coarse)').matches;
+    } catch (e) {
+      return false;
+    }
+  });
+  const padRef = useRef(null);
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  if (!show) return null;
+  const move = (e) => {
+    const r = padRef.current.getBoundingClientRect();
+    const dx = (e.clientX - (r.left + r.width / 2)) / (r.width / 2);
+    const dy = (e.clientY - (r.top + r.height / 2)) / (r.height / 2);
+    const m = Math.max(1, Math.hypot(dx, dy));
+    input.touch.current = { mx: dx / m, my: dy / m };
+    setKnob({ x: (dx / m) * 28, y: (dy / m) * 28 });
+  };
+  const end = () => {
+    input.touch.current = { mx: 0, my: 0 };
+    setKnob({ x: 0, y: 0 });
+  };
+  const labels = CONTROL_HINTS[sport];
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-2 z-20 flex items-end justify-between px-3">
+      <div
+        ref={padRef}
+        className="pointer-events-auto relative h-24 w-24 touch-none rounded-full border-4 border-black bg-white/15"
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          move(e);
+        }}
+        onPointerMove={(e) => e.buttons && move(e)}
+        onPointerUp={end}
+        onPointerCancel={end}
+      >
+        <span className="absolute left-1/2 top-1/2 h-10 w-10 rounded-full border-4 border-black bg-[#ffd23f]" style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }} />
+      </div>
+      <div className="pointer-events-auto flex gap-3">
+        <button type="button" onPointerDown={() => input.press('b0')} className="h-16 w-16 touch-none rounded-full border-4 border-black bg-[#c77dff] text-[8px] text-black">
+          {labels[2][1].split(' ')[0]}
+        </button>
+        <button type="button" onPointerDown={() => input.press('a0')} className="h-20 w-20 touch-none rounded-full border-4 border-black bg-[#ffd23f] text-[8px] text-black">
+          {labels[1][1].split(' ')[0]}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const CONTROL_HINTS = {
+  soccer: [
+    ['WASD', 'MOVE'],
+    ['SPACE', 'PASS / TACKLE'],
+    ['SHIFT', 'SHOOT / SWITCH'],
+  ],
+  basketball: [
+    ['WASD', 'MOVE'],
+    ['SPACE', 'PASS / STEAL'],
+    ['SHIFT', 'SHOOT / SWITCH'],
+  ],
+  football: [
+    ['WASD', 'MOVE / SCRAMBLE'],
+    ['SPACE', 'HIKE / THROW'],
+    ['SHIFT', 'HANDOFF / SWITCH'],
+  ],
+  tennis: [
+    ['WASD', 'RUN TO THE BALL'],
+    ['SPACE', 'SERVE'],
+    ['AUTO', 'SWING WHEN YOU REACH IT'],
+  ],
+};
+
+function arcadeStatus(S) {
+  const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  if (S.sport === 'football') {
+    const f = S.f;
+    if (f.over) return 'FINAL';
+    const goal = f.yard + f.toGo >= 100;
+    const spot = f.yard < 50 ? `OWN ${f.yard}` : f.yard === 50 ? 'MIDFIELD' : `OPP ${100 - f.yard}`;
+    return `${S.teams[f.offense].name} BALL · ${ORD[Math.min(4, f.down)]} & ${goal ? 'GOAL' : f.toGo} · ${spot} · DRIVE ${f.drives[f.offense]}/${f.totalDrives}`;
+  }
+  if (S.sport === 'tennis') return `TIEBREAK TO ${GAME_CONFIG.tennis.pointsToWin} · ${S.teams[S.t.server].name} SERVING`;
+  return mmss(Math.max(0, S.clock));
+}
+
+function ArcadeHud({ teams, hud, sport }) {
+  if (!hud) return null;
+  const side = (i) => (
+    <div className={`flex min-w-0 flex-1 items-center gap-2 ${i === 1 ? 'flex-row-reverse text-right' : ''}`}>
+      <span className="h-7 w-3 shrink-0 border-2 border-black" style={{ background: `linear-gradient(${teams[i].primary} 60%, ${teams[i].secondary} 60%)` }} />
+      <div className="min-w-0">
+        <div className="line-clamp-2 break-words text-[7px] leading-tight sm:text-[10px]" style={{ color: inkFor(teams[i].primary) }}>
+          {teams[i].name}
+        </div>
+        <div className="hidden truncate text-[7px] text-slate-400 sm:block">{hud.ctrl[i] ? `▼ ${hud.ctrl[i]}` : teams[i].isCPU ? 'CPU' : ''}</div>
+      </div>
+      <div className="shrink-0 border-2 border-black bg-black px-1 py-1 text-sm text-[#ffd23f] sm:px-2 sm:text-2xl" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {String(hud.score[i]).padStart(2, '0')}
+      </div>
+    </div>
+  );
+  return (
+    <div className="shrink-0 border-4 border-black bg-[#120f26] px-2 py-1 shadow-[4px_4px_0_#000]">
+      <div className="flex items-center gap-2">
+        {side(0)}
+        <div className="shrink-0 px-1 text-center">
+          <div className="text-lg" aria-hidden="true">
+            {SPORT_INFO[sport].icon}
+          </div>
+        </div>
+        {side(1)}
+      </div>
+      <div className="mt-1 truncate text-center text-[8px] text-[#4cc9f0] sm:text-[9px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {hud.status}
+      </div>
+    </div>
+  );
+}
+
+const DIFF_SKILL = { rookie: 0.86, pro: 0.97, legend: 1.08 };
+
+function makeHint(m, mods, team, prompt) {
+  const M = mods[team];
+  if (!(M.hintChance > 0) || Math.random() >= M.hintChance) return null;
+  const opts = prompt.answers.filter((a, idx) => a.tier >= 4 && !m.used.has(usedKey(prompt.id, idx)));
+  if (!opts.length) return null;
+  const a = pick(opts);
+  return { text: a.text.slice(0, 2).toUpperCase() + a.text.slice(2).toUpperCase().replace(/[A-Z0-9]/g, '_'), tier: a.tier, src: M.src.hintChance };
+}
+
+const ACTION_WORDS = { pass: 'PASS', shoot: 'SHOT', throw: 'THROW', hit: 'SHOT', serve: 'SERVE' };
+
+function ArcadeScreen({ setup, career, onExit, onRematch }) {
+  const sport = setup.sport;
+  const twoP = setup.mode === '2p';
+  const teams = setup.teams;
+  const mods = useMemo(() => (career ? career.mods : [emptyMods(), emptyMods()]), [career]);
+  const input = useArcadeInput(twoP);
+  const canvasRef = useRef(null);
+  const M = useRef(null);
+  const [q, setQ] = useState(null);
+  const [phase, setPhase] = useState('intro');
+  const [hud, setHud] = useState(null);
+  const [feed, setFeed] = useState(null);
+  const [cpuFeed, setCpuFeed] = useState(null);
+  const [paused, setPaused] = useState(false);
+  const [forfeitArmed, setForfeitArmed] = useState(false);
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
+  const areaRef = useRef(null);
+  const [box, setBox] = useState({ w: 320, h: 180, slack: 0 });
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const fit = () => {
+      const W = el.clientWidth;
+      const H = el.clientHeight;
+      let w = W;
+      let h = (W * 9) / 16;
+      if (h > H) {
+        h = H;
+        w = (H * 16) / 9;
+      }
+      setBox({ w: Math.floor(w), h: Math.floor(h), slack: H - Math.floor(h) });
+    };
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    fit();
+    return () => ro.disconnect();
+  }, []);
+
+  if (!M.current) {
+    const m = { stats: [newStats(), newStats()], used: new Set(), deck: shuffle(TRIVIA_BANK.map((_, i) => i)), deckPos: 0, retries: [mods[0].retries, mods[1].retries], qid: 0, q: null, lastPhase: null, cpuLog: null };
+    const weights = career ? career.cpuWeights : (GAME_CONFIG.cpu.difficulties[setup.difficulty] || GAME_CONFIG.cpu.difficulties.pro).tierWeights;
+    m.S = createArcade(setup, {
+      mods,
+      cpuSkill: career ? career.cpuSkill : DIFF_SKILL[setup.difficulty] || 1,
+      cpu: (team) => {
+        const prompt = drawPrompt(m);
+        const raw = cpuAnswer(prompt, m.used, setup.difficulty, weights);
+        const { outcome } = finalizeOutcome(m, mods, team, prompt, raw);
+        m.cpuLog = { id: (m.cpuLog ? m.cpuLog.id : 0) + 1, team, text: raw.kind === 'answer' ? raw.text : raw.text || '???', tier: outcome.kind === 'answer' ? outcome.tier : 0, prompt: prompt.prompt };
+        return outcome;
+      },
+    });
+    M.current = m;
+  }
+
+  useEffect(() => {
+    const ctx = canvasRef.current.getContext('2d');
+    let raf;
+    let last = performance.now();
+    let hudT = 1;
+    let lastCpu = 0;
+    const loop = (now) => {
+      const m = M.current;
+      const S = m.S;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const inp = input.read();
+      if (!pausedRef.current) arcadeStep(S, dt, inp);
+      while (S.sfx.length) SOUND_ENGINE.play(S.sfx.shift());
+      try {
+        arcadeRender(ctx, S, now / 1000);
+      } catch (e) {
+        /* never freeze the loop on a draw error */
+      }
+      if (S.phase === 'question' && !m.q && S.pending) {
+        const prompt = drawPrompt(m);
+        m.q = { id: ++m.qid, team: S.pending.team, kind: S.pending.kind, prompt, hint: makeHint(m, mods, S.pending.team, prompt) };
+        input.clear();
+        setQ(m.q);
+      }
+      if (S.phase !== m.lastPhase) {
+        m.lastPhase = S.phase;
+        setPhase(S.phase);
+      }
+      if (m.cpuLog && m.cpuLog.id !== lastCpu) {
+        lastCpu = m.cpuLog.id;
+        setCpuFeed(m.cpuLog);
+      }
+      hudT += dt;
+      if (hudT > 0.12) {
+        hudT = 0;
+        setHud({ score: [S.score[0], S.score[1]], status: arcadeStatus(S), ctrl: [0, 1].map((t) => (S.control[t] != null && S.players[S.control[t]] ? S.players[S.control[t]].name : '')) });
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [input, mods]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape' && e.key !== 'p' && e.key !== 'P') return;
+      if (e.target && e.target.tagName === 'INPUT') return;
+      const ph = M.current.S.phase;
+      if (ph === 'question' || ph === 'over' || ph === 'intro') return;
+      setPaused((x) => !x);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    if (!feed) return undefined;
+    const id = setTimeout(() => setFeed(null), 2800);
+    return () => clearTimeout(id);
+  }, [feed]);
+  useEffect(() => {
+    if (!cpuFeed) return undefined;
+    const id = setTimeout(() => setCpuFeed(null), 2200);
+    return () => clearTimeout(id);
+  }, [cpuFeed]);
+
+  const start = useCallback(() => {
+    SOUND_ENGINE.unlock();
+    SOUND_ENGINE.play('whistle');
+    const S = M.current.S;
+    S.phase = S.timer > 0 ? 'dead' : 'live';
+    setTimeout(() => input.clear(), 0); // don't let the START keypress count as an action
+  }, [input]);
+
+  const answer = useCallback(
+    (text, timedOut) => {
+      const m = M.current;
+      const S = m.S;
+      const cur = m.q;
+      if (!cur) return undefined;
+      let raw;
+      if (timedOut) raw = { kind: 'timeout', text: '' };
+      else {
+        const hit = matchAnswer(text, cur.prompt);
+        if (!hit) raw = { kind: 'invalid', text };
+        else if (m.used.has(usedKey(cur.prompt.id, hit.idx))) raw = { kind: 'duplicate', text, idx: hit.idx, tier: hit.answer.tier, matchedText: hit.answer.text };
+        else raw = { kind: 'answer', text, idx: hit.idx, tier: hit.answer.tier, matchedText: hit.answer.text };
+        if (raw.kind !== 'answer' && m.retries[cur.team] > 0) {
+          m.retries[cur.team] -= 1;
+          SOUND_ENGINE.play('wrong');
+          return `SECOND WIND (${mods[cur.team].src.retries}): "${text}" ${raw.kind === 'duplicate' ? 'was already used' : "isn't on the board"}. Try again! (${m.retries[cur.team]} left)`;
+        }
+      }
+      SOUND_ENGINE.play(raw.kind === 'answer' ? 'correct' : timedOut ? 'buzzer' : 'wrong');
+      const { outcome, triggers } = finalizeOutcome(m, mods, cur.team, cur.prompt, raw);
+      const best = cur.prompt.answers.filter((a, i) => a.tier === 5 && !m.used.has(usedKey(cur.prompt.id, i))).slice(0, 3).map((a) => a.text);
+      setFeed({ id: cur.id, team: cur.team, kind: cur.kind, outcome, triggers, best, total: cur.prompt.answers.length });
+      m.q = null;
+      setQ(null);
+      input.clear();
+      arcadeResolve(S, outcome);
+      return undefined;
+    },
+    [mods, input]
+  );
+
+  const finish = useCallback(() => {
+    const m = M.current;
+    if (career) career.onFinish({ scores: [m.S.score[0], m.S.score[1]], stats: m.stats[0], sport });
+  }, [career, sport]);
+
+  const m = M.current;
+  const S = m.S;
+  const hints = CONTROL_HINTS[sport];
+  const scores = S.score;
+  const winner = scores[0] === scores[1] ? null : scores[0] > scores[1] ? 0 : 1;
+
+  const panelBelow = box.slack >= 190; // tall screens: question goes under the field instead of over it
+  const questionPanel = q && (
+    <div className={panelBelow ? 'mt-2 w-full max-w-3xl shrink-0 border-t-4 border-black shadow-[6px_6px_0_#000]' : 'absolute inset-x-2 bottom-2 z-20 mx-auto max-w-3xl border-t-4 border-black shadow-[6px_6px_0_#000]'}>
+      <div className="flex items-center justify-between gap-2 border-x-4 border-black bg-[#ffd23f] px-3 py-1 text-[8px] text-black sm:text-[9px]">
+        <span className="truncate">
+          {teams[q.team].name} · {ACTION_WORDS[q.kind]}!
+        </span>
+        <span className="hidden shrink-0 sm:inline">RARER = BETTER {ACTION_WORDS[q.kind]}</span>
+      </div>
+      <PromptPanel key={q.id} prompt={q.prompt} team={teams[q.team]} seconds={GAME_CONFIG.timerSeconds + mods[q.team].extraTime} bonusSeconds={mods[q.team].extraTime} hint={q.hint} onSubmit={(t) => answer(t, false)} onTimeout={() => answer('', true)} />
+    </div>
+  );
+
+  return (
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-[1600px] flex-col gap-2">
+      <ArcadeHud teams={teams} hud={hud} sport={sport} />
+      <div ref={areaRef} className={`relative flex min-h-0 flex-1 flex-col items-center ${panelBelow ? 'justify-start' : 'justify-center'}`}>
+        <div className="relative shrink-0 overflow-hidden border-4 border-black bg-black shadow-[4px_4px_0_#000]" style={{ width: box.w, height: box.h }}>
+          <canvas ref={canvasRef} width={CW} height={CH} className="absolute inset-0 h-full w-full" style={{ imageRendering: 'pixelated' }} aria-label={`${SPORT_INFO[sport].label} match`} />
+          <div className="crt pointer-events-none absolute inset-0" aria-hidden="true" />
+          {cpuFeed && !feed && phase !== 'question' && (
+            <div key={cpuFeed.id} className="pointer-events-none absolute bottom-1 left-1 z-10 max-w-[80%] border-2 border-black bg-black/80 px-2 py-1 text-[7px] text-slate-300 sm:text-[8px]">
+              <span style={{ color: inkFor(teams[cpuFeed.team].primary) }}>{teams[cpuFeed.team].name}</span>: "{cpuFeed.text}" {cpuFeed.tier ? <span style={{ color: GAME_CONFIG.tiers[cpuFeed.tier].color }}>T{cpuFeed.tier}</span> : <span className="text-[#ef476f]">MISS</span>}
+            </div>
+          )}
+          {q && !panelBelow && questionPanel}
+        </div>
+        {q && panelBelow && questionPanel}
+
+        {feed && (
+          <div key={feed.id} className="pointer-events-none absolute left-1/2 z-10 w-[min(94%,640px)] -translate-x-1/2 border-4 border-black bg-[#120f26]/95 px-3 py-2 text-center shadow-[4px_4px_0_#000]" style={{ top: panelBelow ? box.h + 8 : Math.max(8, (box.slack || 0) / 2 + 8) }}>
+            <div className="flex flex-wrap items-center justify-center gap-2 text-[9px]">
+              <span className="text-white">"{feed.outcome.kind === 'timeout' ? 'TIME UP' : feed.outcome.text}"</span>
+              {feed.outcome.kind === 'answer' ? <TierChip tier={feed.outcome.tier} small /> : <span className="border-2 border-black bg-[#ef476f] px-1 text-[8px] text-black">{feed.outcome.kind === 'duplicate' ? 'ALREADY USED' : feed.outcome.kind === 'timeout' ? 'TIME UP' : 'NOT ON THE BOARD'}</span>}
+              {feed.outcome.counter && <span className="text-[8px] text-[#ef476f]">⚠ COUNTERED</span>}
+            </div>
+            {feed.triggers.map((t, i) => (
+              <div key={i} className="mt-1 text-[7px] text-[#4cc9f0]">
+                ⚡ {t}
+              </div>
+            ))}
+            {feed.best.length > 0 && (feed.outcome.kind !== 'answer' || feed.outcome.tier < 5) && <div className="mt-1 text-[7px] text-slate-400">ULTRA-RARE YOU COULD'VE SAID: {feed.best.join(', ')}</div>}
+          </div>
+        )}
+
+        {phase === 'intro' && <ArcadeIntro sport={sport} teams={teams} twoP={twoP} label={career ? career.label : null} onStart={start} />}
+
+        {paused && phase !== 'over' && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 p-3">
+            <div className="w-full max-w-sm border-4 border-black bg-[#1b1736] p-4 text-center shadow-[6px_6px_0_#000]">
+              <div className="text-lg text-[#ffd23f]">PAUSED</div>
+              <div className="mt-4 flex flex-col gap-3">
+                <PixelButton onClick={() => setPaused(false)}>▶ RESUME</PixelButton>
+                {career ? (
+                  <PixelButton color={forfeitArmed ? '#ef476f' : '#8d99ae'} onClick={() => (forfeitArmed ? career.onFinish({ forfeit: true, sport }) : setForfeitArmed(true))}>
+                    {forfeitArmed ? 'CONFIRM FORFEIT (LOSS)' : 'FORFEIT MATCH'}
+                  </PixelButton>
+                ) : (
+                  <PixelButton color="#8d99ae" onClick={onExit}>
+                    QUIT TO SETUP
+                  </PixelButton>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {phase === 'over' && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center overflow-auto bg-black/75 p-3">
+            <div className="max-h-full w-full max-w-xl overflow-auto border-4 border-black bg-[#1b1736] p-4 shadow-[6px_6px_0_#000]">
+              <div className="text-center text-base leading-relaxed text-[#ffd23f] sm:text-2xl" style={{ textShadow: '3px 3px 0 #000' }}>
+                {winner === null ? "IT'S A DRAW!" : `${teams[winner].name} WIN!`}
+              </div>
+              <div className="mt-2 text-center text-2xl text-white sm:text-4xl" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {scores[0]} - {scores[1]}
+              </div>
+              <MatchStats teams={teams} stats={m.stats} />
+              <div className="mt-4 flex flex-wrap justify-center gap-3">
+                {career ? (
+                  <PixelButton onClick={finish}>BACK TO CLUBHOUSE ▶</PixelButton>
+                ) : (
+                  <>
+                    <PixelButton onClick={onRematch}>↻ REMATCH</PixelButton>
+                    <PixelButton onClick={onExit} color="#4cc9f0">
+                      NEW SETUP
+                    </PixelButton>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        {!q && <TouchControls input={input} sport={sport} />}
+      </div>
+      <div className="hidden shrink-0 flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[9px] text-slate-300 sm:flex">
+        {twoP ? (
+          <>
+            <span>
+              <b className="text-[#ffd23f]">P1</b> WASD · F ACTION · G SHOOT/SWITCH
+            </span>
+            <span>
+              <b className="text-[#4cc9f0]">P2</b> ARROWS · K ACTION · L SHOOT/SWITCH
+            </span>
+          </>
+        ) : (
+          hints.map(([k, v]) => (
+            <span key={k}>
+              <span className="border-2 border-black bg-[#1b1736] px-1 text-[#ffd23f]">{k}</span> {v}
+            </span>
+          ))
+        )}
+        <span>
+          <span className="border-2 border-black bg-[#1b1736] px-1 text-[#ffd23f]">ESC</span> PAUSE
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function MatchStats({ teams, stats }) {
+  const rows = [
+    ['QUESTIONS', (s) => s.plays],
+    ['CORRECT', (s) => s.correct],
+    ['ULTRA-RARE / RARE', (s) => `${s.tiers[5]} / ${s.tiers[4]}`],
+    ['AVG RARITY', (s) => (s.correct ? (s.tierSum / s.correct).toFixed(1) : '-')],
+    ['MISSES / TIME-UPS', (s) => `${s.invalid + s.dupes} / ${s.timeouts}`],
+    ['GOT COUNTERED', (s) => s.countered],
+    ['BEST ANSWER', (s) => (s.best ? `${s.best.text} (T${s.best.tier})` : '-')],
+  ];
+  return (
+    <div className="mt-3 overflow-x-auto">
+      <table className="w-full border-2 border-black text-[8px] sm:text-[9px]">
+        <thead className="bg-black text-slate-400">
+          <tr>
+            <th className="px-2 py-1 text-left">TRIVIA</th>
+            {teams.map((t, i) => (
+              <th key={i} className="px-2 py-1 text-left" style={{ color: inkFor(t.primary) }}>
+                {t.name}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([label, fn]) => (
+            <tr key={label} className="border-t border-black/60">
+              <td className="px-2 py-1 text-slate-400">{label}</td>
+              <td className="px-2 py-1 text-white">{fn(stats[0])}</td>
+              <td className="px-2 py-1 text-white">{fn(stats[1])}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ArcadeIntro({ sport, teams, twoP, label, onStart }) {
+  useConfirmKey(onStart);
+  const info = SPORT_INFO[sport];
+  return (
+    <div className="absolute inset-0 z-30 flex items-center justify-center overflow-auto bg-black/65 p-3">
+      <div className="w-full max-w-lg border-4 border-black bg-[#1b1736] p-4 text-center shadow-[6px_6px_0_#000]">
+        <div className="text-3xl" aria-hidden="true">
+          {info.icon}
+        </div>
+        {label && <div className="mt-1 text-[8px] text-slate-400">{label}</div>}
+        <div className="mt-2 text-sm text-[#ffd23f] sm:text-xl">{info.label}</div>
+        <div className="mt-2 text-[9px]">
+          <span style={{ color: inkFor(teams[0].primary) }}>{teams[0].name}</span> <span className="text-slate-500">VS</span> <span style={{ color: inkFor(teams[1].primary) }}>{teams[1].name}</span>
+        </div>
+        <p className="mx-auto mt-3 max-w-md text-[8px] leading-relaxed text-slate-300 sm:text-[9px]">{info.blurb}</p>
+        <div className="mt-3 grid gap-1 text-left text-[8px] sm:text-[9px]">
+          {(twoP
+            ? [
+                ['P1', 'WASD MOVE · F ACTION · G SHOOT/SWITCH'],
+                ['P2', 'ARROWS MOVE · K ACTION · L SHOOT/SWITCH'],
+              ]
+            : CONTROL_HINTS[sport]
+          ).map(([k, v]) => (
+            <div key={k} className="flex items-center gap-2">
+              <span className="w-14 shrink-0 border-2 border-black bg-black px-1 text-center text-[#ffd23f]">{k}</span>
+              <span className="text-slate-200">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 text-[8px] text-[#4cc9f0]">Every {sport === 'tennis' ? 'shot' : sport === 'football' ? 'throw' : 'pass and shot'} freezes play for a question. Rarer answer = better play.</div>
+        <div className="mt-4">
+          <PixelButton onClick={onStart}>▶ START (ENTER)</PixelButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A throwaway lineup (names, looks, abilities) for quick matches. */
+function quickRoster(sport, stars) {
+  const tmp = { nextId: 1, sigs: {}, players: {} };
+  const r = {};
+  ROLES[sport].forEach((role) => (r[role] = makePlayer(tmp, stars, sport, role)));
+  return r;
+}
+
+const RETRO_CSS = `
+.crt{background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),radial-gradient(ellipse at center,transparent 60%,rgba(0,0,0,.45) 100%);}
+.retro-bg{background-color:#0d0b1e;background-image:radial-gradient(#1f1a40 1px,transparent 1px),linear-gradient(180deg,#120e2a 0%,#0d0b1e 60%);background-size:12px 12px,100% 100%;}
+@keyframes rc-blink{50%{opacity:.25}}
+.rc-blink{animation:rc-blink 1s steps(1) infinite}
+@media (prefers-reduced-motion: reduce){.rc-blink{animation:none}}
+`;
+
 export default function RetroClashTriviaBowl() {
   useFontLoader();
   const [screen, setScreen] = useState('title'); // title | newCareer | hub | match | quickSetup | quickMatch
@@ -4416,22 +6028,24 @@ export default function RetroClashTriviaBowl() {
     }
   };
 
-  const playFixture = (f) => {
+  const playFixture = (f, sport) => {
     const rivalIdx = f.home === 0 ? f.away : f.home;
     const club = career.teams[0];
     const rival = career.teams[rivalIdx];
     const setup = {
-      sport: f.sport,
+      sport,
       mode: '1p',
       difficulty: 'pro',
       teams: [
-        { name: club.name, primary: club.primary, secondary: club.secondary, isCPU: false },
-        { name: rival.name, primary: rival.primary, secondary: rival.secondary, isCPU: true },
+        { name: club.name, primary: club.primary, secondary: club.secondary, isCPU: false, roster: rosterFor(career, 0, sport) },
+        { name: rival.name, primary: rival.primary, secondary: rival.secondary, isCPU: true, roster: rosterFor(career, rivalIdx, sport) },
       ],
     };
+    const rating = teamRating(career, rivalIdx, sport);
     const ctx = {
-      mods: [computeMods(activeFor(career, 0, f.sport)), computeMods(activeFor(career, rivalIdx, f.sport))],
-      cpuWeights: cpuWeightsForRating(teamRating(career, rivalIdx, f.sport)),
+      mods: [computeMods(activeFor(career, 0, sport)), computeMods(activeFor(career, rivalIdx, sport))],
+      cpuWeights: cpuWeightsForRating(rating),
+      cpuSkill: 0.8 + rating * 0.06,
       label: career.phase === 'playoffs' ? f.label : `SEASON ${career.season} · WEEK ${career.week + 1}`,
       onFinish: (res) => {
         setCareer((c) => finishUserMatch(c, res));
@@ -4447,15 +6061,16 @@ export default function RetroClashTriviaBowl() {
   const barBtn = 'border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] shadow-[2px_2px_0_#000] hover:bg-[#241f48]';
 
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-[#0d0b1e] text-white" style={{ ...FONT_STYLE, backgroundImage: 'radial-gradient(#1f1a40 1px, transparent 1px)', backgroundSize: '12px 12px' }}>
-      <div style={GUTTER} className="flex items-center justify-between gap-2 border-b-4 border-black bg-[#0a0818] py-2">
+    <div className={`retro-bg flex flex-col text-white ${inMatch ? 'h-[100dvh] overflow-hidden' : 'min-h-[100dvh]'}`} style={FONT_STYLE}>
+      <style>{RETRO_CSS}</style>
+      <div style={GUTTER} className="flex shrink-0 items-center justify-between gap-2 border-b-4 border-black bg-[#0a0818] py-2">
         <div className="flex min-w-0 items-center gap-2">
           {screen !== 'title' && !inMatch && (
-            <button type="button" onClick={() => setScreen('title')} className={barBtn} style={FONT_STYLE}>
+            <button type="button" onClick={() => setScreen('title')} className={`${barBtn} whitespace-nowrap`} style={FONT_STYLE}>
               ◀ MENU
             </button>
           )}
-          <span className="truncate text-[9px] text-[#ffd23f]">{screen === 'title' ? 'INSERT COIN' : 'RETRO CLASH: TRIVIA BOWL'}</span>
+          <span className={`truncate text-[9px] text-[#ffd23f] ${screen === 'title' ? '' : 'hidden sm:inline'}`}>{screen === 'title' ? <span className="rc-blink">INSERT COIN</span> : 'RETRO CLASH: TRIVIA BOWL'}</span>
         </div>
         <div className="flex items-center gap-2">
           {!inMatch && (
@@ -4463,18 +6078,18 @@ export default function RetroClashTriviaBowl() {
               ? HOW TO PLAY
             </button>
           )}
-          <SideLinks />
+          <SideLinks rail={!inMatch} />
           <button type="button" onClick={toggleMute} className={barBtn} style={FONT_STYLE} aria-label={muted ? 'Unmute' : 'Mute'}>
             {muted ? '🔇' : '🔊'}
             <span className="hidden sm:inline">{muted ? ' MUTED' : ' SOUND'}</span>
           </button>
         </div>
       </div>
-      <main className="flex flex-1 flex-col">
+      <main className={`flex flex-1 flex-col ${inMatch ? 'min-h-0' : ''}`}>
         {screen === 'title' ? (
           <TitleScreen career={career} onContinue={() => setScreen('hub')} onNew={() => setScreen('newCareer')} onQuick={() => setScreen('quickSetup')} onTutorial={() => setTutorial(true)} />
         ) : (
-          <div style={GUTTER} className="flex flex-1 flex-col py-4">
+          <div style={GUTTER} className={`flex flex-1 flex-col ${inMatch ? 'min-h-0 py-2' : 'py-4'}`}>
             {screen === 'newCareer' && (
               <NewCareerScreen
                 hasSave={!!career}
@@ -4487,7 +6102,7 @@ export default function RetroClashTriviaBowl() {
               />
             )}
             {screen === 'hub' && career && <CareerHub career={career} setCareer={setCareer} onPlay={playFixture} onHelp={() => setTutorial(true)} />}
-            {screen === 'match' && match && <GameScreen key={gameKey} setup={match.setup} career={match.career} />}
+            {screen === 'match' && match && <ArcadeScreen key={gameKey} setup={match.setup} career={match.career} />}
             {screen === 'quickSetup' && (
               <SetupScreen
                 initial={quickSetup}
@@ -4499,7 +6114,14 @@ export default function RetroClashTriviaBowl() {
                 }}
               />
             )}
-            {screen === 'quickMatch' && match && <GameScreen key={gameKey} setup={match.setup} onExit={() => setScreen('quickSetup')} onRematch={() => setGameKey((k) => k + 1)} />}
+            {screen === 'quickMatch' && match && (
+              <ArcadeScreen
+                key={gameKey}
+                setup={match.setup}
+                onExit={() => setScreen('quickSetup')}
+                onRematch={() => setGameKey((k) => k + 1)}
+              />
+            )}
           </div>
         )}
       </main>
