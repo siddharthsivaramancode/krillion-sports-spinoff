@@ -14,6 +14,8 @@ A retro pixel-art, **real-time** arcade sports game powered by trivia. Move with
 
 Controls: WASD / arrows move · SPACE (or J) pass / throw / hike / serve / tackle · SHIFT (or K) shoot / handoff / switch player · ESC pause. 2-player quick match: P1 WASD + F/G, P2 arrows + K/L. Phones and tablets get an on-screen joystick. The ♪ button in the top bar switches the background music on/off (remembered), and 🔊 switches sound effects.
 
+Answers are forgiving: typos, shorthand ("calc", "nyc") and last names are auto-corrected, and when the game isn't sure it asks "Did you mean...?" with the clock paused. On the claude.ai hosted page, answers it can't place are checked by Claude. The answer clock is 15s on Rookie, 10s on Pro and 7s on Legend.
+
 Career progress saves in your browser's local storage (separately per browser, and separately for the hosted page vs the downloaded file).
 
 ## Files

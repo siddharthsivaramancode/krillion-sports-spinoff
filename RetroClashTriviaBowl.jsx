@@ -32,7 +32,8 @@ export { TRIVIA_BANK, RARITY_CUTOFFS };
    2. GAME_CONFIG  (tune the feel of the game here)
 ============================================================================= */
 export const GAME_CONFIG = {
-  timerSeconds: 15,
+  timerSeconds: 15, // legacy default; real matches use answerSeconds below
+  answerSeconds: { rookie: 15, pro: 10, legend: 7 }, // answer clock by difficulty (CLOCK MANAGER adds to it)
 
   tiers: {
     5: { label: 'ULTRA-RARE', color: '#ffd23f' },
@@ -51,8 +52,9 @@ export const GAME_CONFIG = {
     typoAllowance: [
       { maxLen: 3, typos: 0 },
       { maxLen: 5, typos: 1 },
-      { maxLen: 9, typos: 2 },
-      { maxLen: Infinity, typos: 3 },
+      { maxLen: 8, typos: 2 },
+      { maxLen: 12, typos: 3 },
+      { maxLen: Infinity, typos: 4 },
     ],
   },
 
@@ -3117,26 +3119,152 @@ function candidatesFor(prompt) {
 }
 
 /** Returns { idx, answer, dist } for the best match, or null. */
-export function matchAnswer(guess, prompt) {
-  const g = normalizeAnswer(guess);
-  if (!g) return null;
-  // also try simple singular forms: "cherries" -> "cherry", "foxes" -> "fox", "dogs" -> "dog"
-  const variants = [[g, 0]];
-  if (g.length > 4 && g.endsWith('ies')) variants.push([`${g.slice(0, -3)}y`, 0.25]);
-  if (g.length > 4 && g.endsWith('es')) variants.push([g.slice(0, -2), 0.25]);
-  if (g.length > 3 && g.endsWith('s')) variants.push([g.slice(0, -1), 0.25]);
-  let best = null;
-  for (const { idx, n } of candidatesFor(prompt)) {
-    for (const [v, penalty] of variants) {
-      const max = allowedTypos(Math.min(v.length, n.length));
-      const d = levenshtein(v, n, max);
-      if (d > max) continue;
-      const score = d + penalty;
-      const ans = prompt.answers[idx];
-      if (!best || score < best.dist || (score === best.dist && ans.tier > best.answer.tier)) best = { idx, answer: ans, dist: score };
+// --- Smart autocorrect --------------------------------------------------------
+// Shorthand people type -> the words used in answers. Applied to the whole guess and per word.
+const SHORTHAND = {
+  calc: 'calculator', nyc: 'new york city', ny: 'new york', la: 'los angeles', sf: 'san francisco', dc: 'washington dc', uk: 'united kingdom', usa: 'united states', us: 'united states', uae: 'united arab emirates',
+  tv: 'television', fridge: 'refrigerator', bike: 'bicycle', plane: 'airplane', phone: 'telephone', mic: 'microphone', pc: 'computer', laptop: 'computer', telly: 'television', auto: 'automobile',
+  doc: 'doctor', vet: 'veterinarian', mom: 'mother', mum: 'mother', dad: 'father', ref: 'referee', prof: 'professor', cop: 'police officer', fireman: 'firefighter', mailman: 'mail carrier',
+  bball: 'basketball', fball: 'football', footy: 'football', hoops: 'basketball', ping: 'ping pong', mcd: 'mcdonalds', maccas: 'mcdonalds', bk: 'burger king', kfc: 'kfc', dq: 'dairy queen',
+  fb: 'facebook', ig: 'instagram', insta: 'instagram', yt: 'youtube', gta: 'grand theft auto', cod: 'call of duty', lol: 'league of legends', ps: 'playstation', hp: 'harry potter', lotr: 'lord of the rings',
+  mj: 'michael jordan', kd: 'kevin durant', cr7: 'cristiano ronaldo', mlk: 'martin luther king', jfk: 'john f kennedy', fdr: 'franklin roosevelt', abe: 'abraham lincoln', choc: 'chocolate', veg: 'vegetable',
+  burger: 'hamburger', fries: 'french fries', spaghetti: 'spaghetti', mac: 'macaroni', pb: 'peanut butter', bbq: 'barbecue', ac: 'air conditioning', st: 'saint', mt: 'mount', ft: 'fort',
+};
+const FILLER_WORDS = new Set(['the', 'a', 'an', 'fc', 'cf', 'afc', 'sc', 'club', 'team', 'of', 'and', 'my', 'some', 'i', 'think', 'its', 'it', 'is']);
+
+function normWords(s) {
+  const w = String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/\+/g, ' plus ')
+    .replace(/#/g, ' sharp ')
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const kept = w.filter((x) => !FILLER_WORDS.has(x));
+  return kept.length ? kept : w;
+}
+
+const typoAllow = (len) => GAME_CONFIG.fuzzy.typoAllowance.find((r) => len <= r.maxLen).typos;
+const smartIndexCache = new WeakMap();
+function smartIndex(prompt) {
+  let idx = smartIndexCache.get(prompt);
+  if (!idx) {
+    idx = prompt.answers.map((a) => [a.text, ...(a.aliases || [])].map((s) => ({ c: normalizeAnswer(s), w: normWords(s) })).filter((k) => k.c));
+    smartIndexCache.set(prompt, idx);
+  }
+  return idx;
+}
+
+function scoreKey(g, gw, key) {
+  const { c, w } = key;
+  if (g === c) return 1;
+  let best = 0;
+  const allow = typoAllow(Math.min(g.length, c.length));
+  const d = levenshtein(g, c, allow);
+  if (d <= allow) best = Math.max(best, 0.95 - 0.07 * d);
+  if (g.length >= 3 && c.startsWith(g)) best = Math.max(best, 0.62 + 0.3 * (g.length / c.length));
+  if (g.length >= 4 && c.includes(g)) best = Math.max(best, 0.7);
+  if (c.length >= 4 && g.includes(c)) best = Math.max(best, 0.78);
+  if (w.length > 1) {
+    for (const word of w) {
+      if (word.length < 3) continue;
+      if (word === g) best = Math.max(best, 0.88);
+      else if (g.length >= 4 && levenshtein(g, word, typoAllow(Math.min(word.length, g.length))) <= typoAllow(Math.min(word.length, g.length))) best = Math.max(best, 0.74);
+      else if (g.length >= 3 && word.startsWith(g)) best = Math.max(best, 0.6);
     }
   }
+  if (gw.length > 1) {
+    const hits = gw.filter((x) => w.some((y) => y === x || (x.length >= 4 && levenshtein(x, y, 1) <= 1))).length;
+    if (hits) best = Math.max(best, 0.55 + (0.38 * hits) / Math.max(gw.length, w.length));
+  }
   return best;
+}
+
+/** Ranked guesses for what the player meant: [{ idx, answer, score }] (score 0..1). */
+export function suggestAnswers(guess, prompt) {
+  const words = normWords(guess);
+  if (!words.length) return [];
+  const variants = new Set();
+  const addVariant = (ws) => {
+    const c = ws.join('');
+    if (!c) return;
+    variants.add(JSON.stringify(ws));
+    if (c.length > 4 && c.endsWith('ies')) variants.add(JSON.stringify([...ws.slice(0, -1), ws[ws.length - 1].replace(/ies$/, 'y')]));
+    if (c.length > 4 && c.endsWith('es')) variants.add(JSON.stringify([...ws.slice(0, -1), ws[ws.length - 1].replace(/es$/, '')]));
+    if (c.length > 3 && c.endsWith('s')) variants.add(JSON.stringify([...ws.slice(0, -1), ws[ws.length - 1].replace(/s$/, '')]));
+  };
+  addVariant(words);
+  // unfiltered forms too, so answers made of "filler" words (A&W, T.I., Team Pursuit) still match exactly
+  const raw = normalizeAnswer(guess);
+  if (raw) variants.add(JSON.stringify([raw]));
+  const rawWords = String(guess || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/&/g, ' and ').replace(/['’]/g, '').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  if (rawWords.length) addVariant(rawWords);
+  const whole = SHORTHAND[words.join(' ')];
+  if (whole) addVariant(whole.split(' '));
+  const perWord = words.flatMap((x) => (SHORTHAND[x] ? SHORTHAND[x].split(' ') : [x]));
+  if (perWord.join(' ') !== words.join(' ')) addVariant(perWord);
+  const index = smartIndex(prompt);
+  const scores = new Map();
+  variants.forEach((v) => {
+    const gw = JSON.parse(v);
+    const g = gw.join('');
+    index.forEach((keys, i) => {
+      let s = 0;
+      for (const k of keys) s = Math.max(s, scoreKey(g, gw, k));
+      if (s > (scores.get(i) || 0)) scores.set(i, s);
+    });
+  });
+  return [...scores.entries()]
+    .filter(([, s]) => s >= 0.5)
+    .map(([i, s]) => ({ idx: i, answer: prompt.answers[i], score: s }))
+    .sort((a, b) => b.score - a.score || b.answer.tier - a.answer.tier)
+    .slice(0, 6);
+}
+
+/** 'auto' = accept the top guess; 'confirm' = ask "did you mean?"; 'none' = no idea. */
+export function decideMatch(list) {
+  if (!list.length) return { kind: 'none', list: [] };
+  const [a, b] = list;
+  if (a.score >= 0.999 || (a.score >= 0.9 && (!b || b.score <= a.score - 0.08)) || (a.score >= 0.8 && (!b || b.score <= a.score - 0.15))) return { kind: 'auto', pick: a, list };
+  return { kind: 'confirm', list: list.filter((x) => x.score >= Math.max(0.5, a.score - 0.25)).slice(0, 3) };
+}
+
+// Optional: on the claude.ai hosted page the game may ask Claude what the player meant.
+let samplerPromise = null;
+function getSampler() {
+  if (typeof window === 'undefined' || !window.claude || typeof window.claude.use !== 'function') return Promise.resolve(null);
+  if (!samplerPromise) samplerPromise = Promise.resolve(window.claude.use('sample')).catch(() => null);
+  return samplerPromise;
+}
+
+async function askClaudeJudge(guess, prompt) {
+  const sample = await getSampler();
+  if (!sample) return null;
+  const list = prompt.answers.map((a, i) => `${i}: ${a.text}`).join('\n');
+  const input = `You judge answers in a trivia game.\nPrompt: "${prompt.prompt}"\nThe player typed: "${guess}"\n\nValid answers (index: text):\n${list}\n\nWhat did the player mean? If they clearly mean one of the listed answers (typo, abbreviation, nickname, partial name, description, or obvious synonym, e.g. "calc" for an invention list meaning "Calculator", or a close relative like "abacus" when only that is listed), give its index. If they did not mean a listed answer but what they typed is still a correct, real answer to the prompt, set valid to true. Otherwise index null and valid false.\nReply with ONLY JSON: {"index": number or null, "valid": true or false, "label": "short proper name of what they meant"}`;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const r = await sample.json(input, { modelTier: 'quick', signal: ctl.signal });
+    if (!r || typeof r !== 'object') return null;
+    const index = Number.isInteger(r.index) && r.index >= 0 && r.index < prompt.answers.length ? r.index : null;
+    return { index, valid: !!r.valid && index === null, label: typeof r.label === 'string' ? r.label.slice(0, 40) : guess };
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Back-compat: the confident match (or null). */
+export function matchAnswer(guess, prompt) {
+  const d = decideMatch(suggestAnswers(guess, prompt));
+  if (d.kind !== 'auto') return null;
+  return { idx: d.pick.idx, answer: d.pick.answer, dist: 1 - d.pick.score };
 }
 
 // --- Prompt deck + CPU brain -------------------------------------------------
@@ -3473,7 +3601,7 @@ function makeSchedule(n, season) {
 
 export function newCareer(club) {
   const CC = CAREER_CONFIG;
-  const c = { version: 2, nextId: 1, sigs: {}, season: 1, week: 0, phase: 'regular', coins: CC.startingCoins, players: {}, teams: [], lineups: emptyLineups(), schedule: [], playoffs: null, freeAgents: [], news: [], lastReport: null, offseason: null, history: [] };
+  const c = { version: 2, difficulty: club.difficulty || 'pro', nextId: 1, sigs: {}, season: 1, week: 0, phase: 'regular', coins: CC.startingCoins, players: {}, teams: [], lineups: emptyLineups(), schedule: [], playoffs: null, freeAgents: [], news: [], lastReport: null, offseason: null, history: [] };
   const user = { name: club.name, primary: club.primary, secondary: club.secondary, roster: [] };
   c.teams.push(user);
   // Free starter squad: it does NOT fill every position, so you have to buy the rest.
@@ -4122,24 +4250,33 @@ function PromptPanel({ prompt, team, seconds, onSubmit, onTimeout, hint, bonusSe
   const [text, setText] = useState('');
   const [left, setLeft] = useState(seconds);
   const [notice, setNotice] = useState(null);
+  const [choices, setChoices] = useState(null); // { list: [{idx, text}], source, typed }
+  const [busy, setBusy] = useState(false);
   const doneRef = useRef(false);
+  const pausedRef = useRef(false);
   const inputRef = useRef(null);
   const timeoutRef = useRef(onTimeout);
   timeoutRef.current = onTimeout;
+  pausedRef.current = !!choices || busy;
 
   useEffect(() => {
     if (inputRef.current) inputRef.current.focus();
-    const end = performance.now() + seconds * 1000;
+    let rem = seconds;
+    let last = performance.now();
     let lastWhole = Math.ceil(seconds);
     const id = setInterval(() => {
-      const rem = Math.max(0, (end - performance.now()) / 1000);
+      const now = performance.now();
+      const dt = (now - last) / 1000;
+      last = now;
+      if (pausedRef.current || doneRef.current) return; // the clock stops while you confirm or Claude thinks
+      rem = Math.max(0, rem - dt);
       setLeft(rem);
       const whole = Math.ceil(rem);
       if (whole < lastWhole) {
         lastWhole = whole;
         if (whole <= 5 && whole > 0) SOUND_ENGINE.play('tick');
       }
-      if (rem <= 0 && !doneRef.current) {
+      if (rem <= 0) {
         doneRef.current = true;
         clearInterval(id);
         timeoutRef.current();
@@ -4148,58 +4285,124 @@ function PromptPanel({ prompt, team, seconds, onSubmit, onTimeout, hint, bonusSe
     return () => clearInterval(id);
   }, [seconds]);
 
+  const handle = (r) => {
+    if (r === undefined) return; // resolved: the panel is about to close
+    doneRef.current = false;
+    if (typeof r === 'string') {
+      setText('');
+      setNotice(r);
+      if (inputRef.current) inputRef.current.focus();
+    } else if (r && r.choices) setChoices(r);
+  };
+  const run = async (payload) => {
+    doneRef.current = true;
+    setBusy(true);
+    let r;
+    try {
+      r = await onSubmit(payload);
+    } finally {
+      setBusy(false);
+    }
+    handle(r);
+  };
   const submit = (e) => {
     e.preventDefault();
-    if (doneRef.current || !text.trim()) return;
-    doneRef.current = true;
-    const retryMsg = onSubmit(text);
-    if (typeof retryMsg === 'string') {
-      // a SECOND WIND retry was used: keep the clock running and let them type again
-      doneRef.current = false;
-      setText('');
-      setNotice(retryMsg);
-      if (inputRef.current) inputRef.current.focus();
-    }
+    if (doneRef.current || busy || choices || !text.trim()) return;
+    run({ type: 'text', text });
   };
+  const pick = (idx) => {
+    const c = choices;
+    setChoices(null);
+    run({ type: 'pick', idx, text: c.typed, source: c.source });
+  };
+  const reject = () => {
+    const c = choices;
+    setChoices(null);
+    run({ type: 'reject', text: c.typed, source: c.source });
+  };
+  useEffect(() => {
+    if (!choices) return undefined;
+    const onKey = (e) => {
+      if (e.key >= '1' && e.key <= String(choices.list.length)) {
+        e.preventDefault();
+        pick(choices.list[Number(e.key) - 1].idx);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        pick(choices.list[0].idx);
+      } else if (e.key === 'Escape' || e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        reject();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [choices]);
+
   const pct = (left / seconds) * 100;
-  const barColor = left <= 5 ? '#ef476f' : left <= 9 ? '#ffd23f' : '#06d6a0';
+  const barColor = left <= 3 ? '#ef476f' : left <= seconds / 2 ? '#ffd23f' : '#06d6a0';
   return (
     <form onSubmit={submit} className="border-4 border-t-0 border-black bg-[#1b1736] p-3">
-      <div className="mb-2 flex items-center justify-between text-[8px]">
+      <div className="mb-2 flex items-center justify-between gap-2 text-[8px]">
         <span className="border-2 border-black bg-black px-2 py-1 text-[#c77dff]">{prompt.category}</span>
-        <span style={{ color: inkFor(team.primary) }}>{team.name} ON THE CLOCK</span>
+        <span className="truncate" style={{ color: inkFor(team.primary) }}>
+          {team.name} ON THE CLOCK
+        </span>
       </div>
       <div className="mb-3 text-center text-[11px] leading-relaxed text-white sm:text-sm">{prompt.prompt}</div>
-      {hint && (
+      {hint && !choices && (
         <div className="mb-3 text-center text-[8px] leading-relaxed text-[#4cc9f0]">
           ⚡ FILM STUDY ({hint.src}): a T{hint.tier} answer looks like <span className="tracking-[0.2em] text-white">{hint.text}</span>
         </div>
       )}
       <div className="mb-3 h-4 w-full border-2 border-black bg-black">
-        <div className="h-full transition-[width] duration-75 ease-linear" style={{ width: `${pct}%`, background: barColor }} />
+        <div className="h-full transition-[width] duration-75 ease-linear" style={{ width: `${pct}%`, background: pausedRef.current ? '#4cc9f0' : barColor }} />
       </div>
-      <div className="flex gap-2">
-        <input
-          ref={inputRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="TYPE AN ANSWER"
-          maxLength={48}
-          autoComplete="off"
-          spellCheck={false}
-          className="min-w-0 flex-1 border-4 border-black bg-black px-3 py-3 text-[11px] text-white placeholder-slate-600 outline-none focus:border-[#ffd23f]"
-          style={FONT_STYLE}
-        />
-        <PixelButton type="submit" disabled={!text.trim()}>
-          GO
-        </PixelButton>
-      </div>
-      {notice && <div className="mt-2 text-[8px] leading-relaxed text-[#ffd23f]">⚡ {notice}</div>}
+      {choices ? (
+        <div className="flex flex-col gap-2">
+          <div className="text-center text-[9px] text-[#ffd23f]">
+            {choices.source === 'claude' ? '🤖 CLAUDE THINKS' : 'DID YOU MEAN'} ... ? <span className="text-slate-400">(you typed "{choices.typed}")</span>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            {choices.list.map((c, i) => (
+              <PixelButton key={c.idx} onClick={() => pick(c.idx)} color={i === 0 ? '#06d6a0' : '#4cc9f0'}>
+                {i + 1}. {c.text}
+              </PixelButton>
+            ))}
+            <PixelButton onClick={reject} color="#8d99ae">
+              NO
+            </PixelButton>
+          </div>
+          <div className="text-center text-[7px] text-slate-500">ENTER = FIRST · 1-3 = PICK · N / ESC = NO · CLOCK PAUSED</div>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <input
+            ref={inputRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={busy ? 'CHECKING...' : 'TYPE AN ANSWER'}
+            maxLength={48}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            disabled={busy}
+            className="min-w-0 flex-1 border-4 border-black bg-black px-3 py-3 text-[11px] text-white placeholder-slate-600 outline-none focus:border-[#ffd23f] disabled:opacity-60"
+            style={FONT_STYLE}
+          />
+          <PixelButton type="submit" disabled={!text.trim() || busy}>
+            {busy ? '...' : 'GO'}
+          </PixelButton>
+        </div>
+      )}
+      {busy && <div className="mt-2 text-center text-[8px] text-[#4cc9f0] rc-blink">🤖 ASKING CLAUDE WHAT YOU MEANT... (CLOCK PAUSED)</div>}
+      {notice && !choices && <div className="mt-2 text-[8px] leading-relaxed text-[#ffd23f]">⚡ {notice}</div>}
       <div className="mt-2 flex justify-between text-[8px] text-slate-500">
         <span>
           {Math.ceil(left)}s{bonusSeconds ? <span className="text-[#4cc9f0]"> (+{bonusSeconds}s CLOCK MANAGER)</span> : null}
         </span>
-        <span className="hidden sm:inline">T1-T2 ANSWERS RISK A COUNTER-ATTACK</span>
+        <span className="hidden sm:inline">TYPOS & SHORTHAND ARE OK</span>
       </div>
     </form>
   );
@@ -4311,7 +4514,7 @@ function TeamBadge({ team, head = 'helmet', scale = 3 }) {
   );
 }
 
-function MatchPreview({ sport, teams }) {
+function MatchPreview({ sport, teams, fill }) {
   const ref = useRef(null);
   useEffect(() => {
     const ctx = ref.current.getContext('2d');
@@ -4329,7 +4532,7 @@ function MatchPreview({ sport, teams }) {
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [sport, teams]);
-  return <canvas ref={ref} width={CW} height={CH} className="block w-full border-4 border-black bg-black" style={{ imageRendering: 'pixelated', aspectRatio: '16 / 9' }} aria-hidden="true" />;
+  return <canvas ref={ref} width={CW} height={CH} className={fill ? 'block h-full w-full object-contain' : 'block w-full border-4 border-black bg-black'} style={{ imageRendering: 'pixelated', ...(fill ? {} : { aspectRatio: '16 / 9' }) }} aria-hidden="true" />;
 }
 
 function SeasonCard({ career }) {
@@ -4339,62 +4542,60 @@ function SeasonCard({ career }) {
   const wages = roster.reduce((s, p) => s + p.salary, 0);
   const phase = career.phase === 'regular' ? 'REGULAR SEASON' : career.phase === 'playoffs' ? 'PLAYOFFS' : 'OFF-SEASON';
   return (
-    <Panel title={`SEASON ${career.season}`} right={phase}>
-      <div className="mb-1 flex justify-between text-[8px] text-slate-400">
-        <span>WEEKS PLAYED</span>
-        <span>
-          {done}/{weeks}
+    <section className="shrink-0 border-4 border-black bg-[#120f26] p-2 shadow-[3px_3px_0_#000]">
+      <div className="flex items-center justify-between text-[8px]">
+        <span className="text-[#ffd23f]">SEASON {career.season}</span>
+        <span className="text-slate-400">
+          {phase} · {done}/{weeks}
         </span>
       </div>
-      <div className="h-3 w-full border-2 border-black bg-black">
+      <div className="mt-1 h-2 w-full border border-black bg-black">
         <div className="h-full bg-[#06d6a0]" style={{ width: `${(done / weeks) * 100}%` }} />
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-[8px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+      <div className="mt-2 grid grid-cols-3 gap-1 text-[7px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
         {[
-          ['COINS', `${career.coins.toLocaleString()}c`, '#ffd23f'],
-          ['WAGES / MATCH', `${wages}c`, '#ef476f'],
+          ['WAGES', `${wages}c`, '#ef476f'],
           ['ROSTER', `${roster.length}/${CAREER_CONFIG.rosterMax}`, '#fff'],
           ['TITLES', career.history.filter((h) => h.won).length, '#ffd23f'],
         ].map(([k, v, c]) => (
-          <div key={k} className="border-2 border-black bg-black/40 p-2">
+          <div key={k} className="border border-black bg-black/40 px-1 py-1">
             <div className="text-slate-500">{k}</div>
-            <div className="mt-1 text-[11px]" style={{ color: c }}>
+            <div className="mt-[2px] text-[9px]" style={{ color: c }}>
               {v}
             </div>
           </div>
         ))}
       </div>
-    </Panel>
+    </section>
   );
 }
 
 function MiniStandings({ career, onOpen }) {
   const st = standings(career);
   return (
-    <Panel
-      title="STANDINGS"
-      right={
-        <button type="button" onClick={onOpen} className="underline hover:text-white">
-          FULL TABLE ▶
+    <section className="shrink-0 border-4 border-black bg-[#120f26] p-2 shadow-[3px_3px_0_#000]">
+      <div className="mb-1 flex items-center justify-between text-[8px]">
+        <span className="text-[#ffd23f]">STANDINGS</span>
+        <button type="button" onClick={onOpen} className="text-slate-400 underline hover:text-white">
+          FULL ▶
         </button>
-      }
-    >
-      <table className="w-full text-[8px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+      </div>
+      <table className="w-full text-[7px] sm:text-[8px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
         <tbody>
           {st.map((r, k) => {
             const t = career.teams[r.i];
             return (
               <tr key={r.i} className={`border-t border-black ${k === 3 ? 'border-b-2 border-b-[#ffd23f]' : ''}`}>
-                <td className="w-5 py-1 text-slate-500">{k + 1}</td>
-                <td className="py-1">
-                  <span className="flex min-w-0 items-center gap-2">
+                <td className="w-4 py-[2px] text-slate-500">{k + 1}</td>
+                <td className="py-[2px]">
+                  <span className="flex min-w-0 items-center gap-1">
                     <span className="inline-block h-2 w-2 shrink-0 border border-black" style={{ background: t.primary }} />
                     <span className="truncate" style={{ color: r.i === 0 ? '#ffd23f' : '#e2e8f0' }}>
                       {t.name}
                     </span>
                   </span>
                 </td>
-                <td className="py-1 text-right text-slate-300">
+                <td className="py-[2px] text-right text-slate-300">
                   {r.w}-{r.l}-{r.t}
                 </td>
               </tr>
@@ -4402,7 +4603,7 @@ function MiniStandings({ career, onOpen }) {
           })}
         </tbody>
       </table>
-    </Panel>
+    </section>
   );
 }
 
@@ -4446,10 +4647,12 @@ function HomeTab({ career, onPlay, act, setTab, goMarket }) {
   const f = currentFixture(career);
   const rep = career.lastReport;
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
+    <div className="grid h-full min-h-0 gap-3 lg:grid-cols-3">
+      <div className="flex min-h-[420px] min-w-0 flex-col lg:col-span-2 lg:min-h-0">
         {career.phase === 'offseason' ? (
-          <OffseasonPanel career={career} act={act} />
+          <div className="min-h-0 flex-1 overflow-auto">
+            <OffseasonPanel career={career} act={act} />
+          </div>
         ) : f ? (
           <NextFixture key={`${career.season}-${career.week}-${career.phase}`} career={career} f={f} onPlay={onPlay} goMarket={goMarket} />
         ) : (
@@ -4457,52 +4660,39 @@ function HomeTab({ career, onPlay, act, setTab, goMarket }) {
             <div className="text-[9px] text-slate-400">No fixture right now.</div>
           </Panel>
         )}
+      </div>
+      <div className="flex min-h-0 min-w-0 flex-col gap-3">
+        <SeasonCard career={career} />
         {rep && (
-          <Panel title={`LAST RESULT · ${rep.label}`}>
-            <div className="flex flex-wrap items-baseline justify-between gap-3">
-              <div className="text-base leading-relaxed sm:text-xl" style={{ color: rep.outcome === 'win' ? '#06d6a0' : rep.outcome === 'loss' ? '#ef476f' : '#ffd23f' }}>
-                {rep.forfeit ? 'FORFEIT' : rep.outcome.toUpperCase()} {rep.scores[0]}-{rep.scores[1]}
-              </div>
-              <div className="text-[8px] text-slate-400">
-                {SPORT_ICON[rep.sport]} vs {rep.rival}
-              </div>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-1 text-[8px] sm:grid-cols-4">
-              <span className="text-slate-300">RESULT +{rep.base}</span>
-              <span className="text-slate-300">RARE ANSWERS +{rep.bonus}</span>
-              {rep.playoffBonus > 0 && <span className="text-[#06d6a0]">PLAYOFF WIN +{rep.playoffBonus}</span>}
-              <span className={rep.paid ? 'text-slate-300' : 'text-[#ef476f]'}>
-                WAGES -{rep.wages}
-                {rep.paid ? '' : ' (UNPAID!)'}
+          <section className="shrink-0 border-4 border-black bg-[#120f26] p-2 shadow-[3px_3px_0_#000]">
+            <div className="flex items-center justify-between gap-2 text-[8px]">
+              <span className="text-slate-400">LAST · {rep.label}</span>
+              <span className="truncate text-slate-400">
+                {SPORT_INFO[rep.sport].icon} vs {rep.rival}
               </span>
             </div>
-          </Panel>
+            <div className="mt-1 flex items-baseline justify-between gap-2">
+              <span className="text-xs sm:text-sm" style={{ color: rep.outcome === 'win' ? '#06d6a0' : rep.outcome === 'loss' ? '#ef476f' : '#ffd23f' }}>
+                {rep.forfeit ? 'FORFEIT' : rep.outcome.toUpperCase()} {rep.scores[0]}-{rep.scores[1]}
+              </span>
+              <span className="text-[7px] text-slate-400" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                +{rep.base + rep.bonus + rep.playoffBonus}c · WAGES -{rep.wages}
+                {rep.paid ? '' : ' (UNPAID)'}
+              </span>
+            </div>
+          </section>
         )}
-        <SquadOverview career={career} onOpen={() => setTab('roster')} />
-      </div>
-      <div className="flex min-w-0 flex-col gap-4">
-        <SeasonCard career={career} />
         <MiniStandings career={career} onOpen={() => setTab('league')} />
-        <Panel title="CLUB NEWS">
-          <ul className="flex flex-col gap-2">
-            {career.news.slice(0, 7).map((n, i) => (
-              <li key={i} className="text-[8px] leading-relaxed text-slate-300">
+        <section className="flex min-h-[90px] flex-1 flex-col border-4 border-black bg-[#120f26] p-2 shadow-[3px_3px_0_#000]">
+          <div className="mb-1 text-[8px] text-[#ffd23f]">CLUB NEWS</div>
+          <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto">
+            {career.news.slice(0, 10).map((n, i) => (
+              <li key={i} className="text-[7px] leading-relaxed text-slate-300 sm:text-[8px]">
                 {n}
               </li>
             ))}
           </ul>
-        </Panel>
-        {career.history.length > 0 && (
-          <Panel title="TROPHY CABINET">
-            <ul className="flex flex-col gap-1 text-[8px] text-slate-300">
-              {career.history.map((h) => (
-                <li key={h.season}>
-                  S{h.season}: {h.won ? <span className="text-[#ffd23f]">🏆 CHAMPIONS</span> : `finished #${h.finish} · champion ${h.champion}`}
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        )}
+        </section>
       </div>
     </div>
   );
@@ -4520,7 +4710,7 @@ function NextFixture({ career, f, onPlay, goMarket }) {
   const myR = teamRating(career, 0, sport);
   const theirR = teamRating(career, rivalIdx, sport);
   const info = SPORT_INFO[sport];
-  const label = career.phase === 'playoffs' ? f.label : `WEEK ${career.week + 1} OF ${seasonWeeks(career)}`;
+  const label = career.phase === 'playoffs' ? f.label : `WEEK ${career.week + 1}/${seasonWeeks(career)}`;
   const previewTeams = useMemo(
     () => [
       { name: club.name, primary: club.primary, secondary: club.secondary, roster: rosterFor(career, 0, sport) },
@@ -4529,31 +4719,37 @@ function NextFixture({ career, f, onPlay, goMarket }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [club.name, club.primary, club.secondary, rival.name, sport, career.lineups]
   );
-  const unit = (team, players, rating) => (
-    <div className="min-w-0 flex-1">
-      <div className="flex items-center gap-2">
-        <TeamBadge team={team} head={info.head} />
+  const unit = (team, players, rating, alignRight) => (
+    <div className={`min-w-0 flex-1 ${alignRight ? 'text-right' : ''}`}>
+      <div className={`flex items-center gap-2 ${alignRight ? 'flex-row-reverse' : ''}`}>
+        <TeamBadge team={team} head={info.head} scale={2} />
         <div className="min-w-0">
-          <div className="truncate text-[10px] sm:text-xs" style={{ color: inkFor(team.primary) }}>
+          <div className="truncate text-[9px] sm:text-[10px]" style={{ color: inkFor(team.primary) }}>
             {team.name}
           </div>
-          <div className="mt-1 text-[8px] text-slate-400">
-            LINEUP <StarIcon /> {rating.toFixed(1)}
+          <div className="text-[7px] text-slate-400">
+            <StarIcon size={7} /> {rating.toFixed(1)}
           </div>
         </div>
       </div>
-      <ul className="mt-2 flex flex-col gap-1">
+      <div className={`mt-1 flex flex-wrap gap-1 ${alignRight ? 'justify-end' : ''}`}>
         {players.map((p) => (
-          <li key={p.id} className="truncate text-[7px] leading-relaxed text-slate-300 sm:text-[8px]">
-            <span className="text-white">{p.pos}</span> <Stars n={p.stars} /> {p.name} · <span style={{ color: KIND_COLOR[ABILITIES[p.ability.key].kind] }}>{abilityName(p.ability)}</span>
-          </li>
+          <span key={p.id} title={`${p.name} · ${abilityName(p.ability)}`} className="border border-black bg-black/50 px-1 text-[7px] text-slate-200">
+            <span className="text-white">{p.pos}</span> <span className="text-[#ffd23f]">{p.stars}★</span>
+          </span>
         ))}
-      </ul>
+      </div>
     </div>
   );
   return (
-    <Panel title={`NEXT UP · ${label} · VS ${rival.name}`} right="YOU PICK THE SPORT">
-      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <section className="flex h-full min-h-0 flex-col border-4 border-black bg-[#120f26] p-2 shadow-[3px_3px_0_#000] sm:p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[8px] sm:text-[9px]">
+        <span className="text-[#ffd23f]">
+          NEXT UP · {label} · VS {rival.name}
+        </span>
+        <span className="text-slate-400">PICK THE SPORT</span>
+      </div>
+      <div className="mb-2 grid shrink-0 grid-cols-4 gap-1 sm:gap-2">
         {SPORT_IDS.map((s) => {
           const miss = missingRoles(career, s);
           return (
@@ -4564,24 +4760,24 @@ function NextFixture({ career, f, onPlay, goMarket }) {
                 SOUND_ENGINE.play('select');
                 setSport(s);
               }}
-              className={`border-4 border-black px-2 py-2 text-left shadow-[3px_3px_0_#000] ${sport === s ? 'bg-[#ffd23f] text-black' : 'bg-[#1b1736] text-white'}`}
+              className={`border-2 border-black px-1 py-1 text-left shadow-[2px_2px_0_#000] sm:border-4 sm:px-2 ${sport === s ? 'bg-[#ffd23f] text-black' : 'bg-[#1b1736] text-white'}`}
               style={FONT_STYLE}
             >
-              <div className="text-[10px]">
-                {SPORT_INFO[s].icon} {SPORT_INFO[s].label}
+              <div className="truncate text-[8px] sm:text-[10px]">
+                {SPORT_INFO[s].icon} <span className="hidden sm:inline">{SPORT_INFO[s].label}</span>
               </div>
-              <div className={`mt-1 text-[7px] ${miss.length ? (sport === s ? 'text-[#a4133c]' : 'text-[#ef476f]') : sport === s ? 'text-[#05603f]' : 'text-[#06d6a0]'}`}>{miss.length ? `NEED ${miss.join(', ')}` : '✓ READY'}</div>
+              <div className={`truncate text-[6px] sm:text-[7px] ${miss.length ? (sport === s ? 'text-[#a4133c]' : 'text-[#ef476f]') : sport === s ? 'text-[#05603f]' : 'text-[#06d6a0]'}`}>{miss.length ? `NEED ${miss.join(',')}` : '✓ READY'}</div>
             </button>
           );
         })}
       </div>
-      <div className="relative">
-        <MatchPreview sport={sport} teams={previewTeams} />
+      <div className="relative min-h-[120px] flex-1 border-4 border-black bg-black">
+        <MatchPreview sport={sport} teams={previewTeams} fill />
         {missing.length > 0 && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/70 p-3 text-center">
             <div>
-              <div className="text-[10px] leading-relaxed text-[#ef476f] sm:text-sm">YOUR {info.label} LINEUP IS MISSING: {missing.join(', ')}</div>
-              <div className="mt-3">
+              <div className="text-[9px] leading-relaxed text-[#ef476f] sm:text-xs">YOUR {info.label} LINEUP IS MISSING: {missing.join(', ')}</div>
+              <div className="mt-2">
                 <PixelButton onClick={() => goMarket(sport)} color="#ef476f">
                   SIGN PLAYERS ▶
                 </PixelButton>
@@ -4590,18 +4786,18 @@ function NextFixture({ career, f, onPlay, goMarket }) {
           </div>
         )}
       </div>
-      <div className="mt-4 flex flex-col gap-4 sm:flex-row">
-        {unit(club, mine, myR)}
-        <div className="self-center text-[10px] text-slate-500">VS</div>
-        {unit(rival, theirs, theirR)}
+      <div className="mt-2 flex shrink-0 gap-3">
+        {unit(club, mine, myR, false)}
+        <div className="self-center text-[9px] text-slate-500">VS</div>
+        {unit(rival, theirs, theirR, true)}
       </div>
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="text-[8px] leading-relaxed text-slate-400">{missing.length ? 'Fill every position to play this sport, or pick a sport you are ready for.' : myR >= theirR + 0.4 ? "FAVOURITES. Don't get countered." : theirR >= myR + 0.4 ? 'UNDERDOGS. Go for the rare answers.' : 'EVEN MATCHUP.'}</div>
-        <PixelButton onClick={() => onPlay(f, sport)} disabled={missing.length > 0} className="px-8 text-sm">
+      <div className="mt-2 flex shrink-0 flex-wrap items-center justify-between gap-2">
+        <div className="text-[7px] leading-relaxed text-slate-400 sm:text-[8px]">{missing.length ? 'Fill every position or pick a ready sport.' : myR >= theirR + 0.4 ? "FAVOURITES. Don't get countered." : theirR >= myR + 0.4 ? 'UNDERDOGS. Go for rare answers.' : 'EVEN MATCHUP.'}</div>
+        <PixelButton onClick={() => onPlay(f, sport)} disabled={missing.length > 0} className="px-6">
           ▶ PLAY {info.label}
         </PixelButton>
       </div>
-    </Panel>
+    </section>
   );
 }
 
@@ -4922,7 +5118,7 @@ function CareerHub({ career, setCareer, onPlay, onHelp }) {
     const id = setTimeout(() => setFlash(null), 2600);
     return () => clearTimeout(id);
   }, [flash]);
-  const phaseLabel = career.phase === 'regular' ? `WEEK ${Math.min(career.week + 1, seasonWeeks(career))}/${seasonWeeks(career)}` : career.phase === 'playoffs' ? 'PLAYOFFS' : 'OFF-SEASON';
+  const phaseLabel = career.phase === 'regular' ? `WK ${Math.min(career.week + 1, seasonWeeks(career))}/${seasonWeeks(career)}` : career.phase === 'playoffs' ? 'PLAYOFFS' : 'OFF-SEASON';
   const tabs = [
     ['home', 'HOME'],
     ['roster', 'ROSTER'],
@@ -4930,34 +5126,32 @@ function CareerHub({ career, setCareer, onPlay, onHelp }) {
     ['league', 'LEAGUE'],
     ['schedule', 'SCHEDULE'],
   ];
-  const stat = (k, v, c = '#fff') => (
-    <div className="border-2 border-black bg-black/50 px-3 py-2">
-      <div className="text-[7px] text-slate-500">{k}</div>
-      <div className="mt-1 text-[10px] sm:text-sm" style={{ color: c, fontVariantNumeric: 'tabular-nums' }}>
+  const chip = (k, v, c = '#fff') => (
+    <div className="border-2 border-black bg-black/50 px-2 py-1 text-center">
+      <div className="text-[6px] text-slate-500 sm:text-[7px]">{k}</div>
+      <div className="text-[9px] sm:text-[11px]" style={{ color: c, fontVariantNumeric: 'tabular-nums' }}>
         {v}
       </div>
     </div>
   );
   return (
-    <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-4">
-      <header className="border-4 border-black bg-[#120f26] p-3 shadow-[4px_4px_0_#000] sm:p-4">
-        <div className="flex flex-wrap items-center gap-4">
-          <TeamBadge team={club} scale={6} />
-          <div className="min-w-0 flex-1">
-            <div className="text-[8px] text-slate-500">CLUBHOUSE</div>
-            <div className="truncate text-lg sm:text-3xl" style={{ color: inkFor(club.primary), textShadow: '3px 3px 0 #000' }}>
-              {club.name}
-            </div>
-          </div>
-          <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 lg:w-auto">
-            {stat('SEASON', `${career.season} · ${phaseLabel}`)}
-            {stat('RECORD', `${me.w}-${me.l}-${me.t}`)}
-            {stat('RANK', `#${rank} OF ${career.teams.length}`, rank <= 4 ? '#06d6a0' : '#fff')}
-            {stat('COINS', `${career.coins.toLocaleString()}c`, '#ffd23f')}
+    <div className="relative mx-auto flex h-full min-h-0 w-full max-w-[1500px] flex-col gap-2">
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-4 border-black bg-[#120f26] px-2 py-1 shadow-[3px_3px_0_#000] sm:gap-3">
+        <TeamBadge team={club} scale={3} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[7px] text-slate-500">CLUBHOUSE</div>
+          <div className="truncate text-sm sm:text-xl" style={{ color: inkFor(club.primary), textShadow: '2px 2px 0 #000' }}>
+            {club.name}
           </div>
         </div>
+        <div className="grid grid-cols-4 gap-1 sm:gap-2">
+          {chip('SEASON', `${career.season} · ${phaseLabel}`)}
+          {chip('RECORD', `${me.w}-${me.l}-${me.t}`)}
+          {chip('RANK', `#${rank}/${career.teams.length}`, rank <= 4 ? '#06d6a0' : '#fff')}
+          {chip('COINS', `${career.coins.toLocaleString()}c`, '#ffd23f')}
+        </div>
       </header>
-      <nav className="grid grid-cols-3 gap-2 sm:grid-cols-6" aria-label="Clubhouse">
+      <nav className="grid shrink-0 grid-cols-6 gap-1 sm:gap-2" aria-label="Clubhouse">
         {tabs.map(([id, label]) => (
           <button
             key={id}
@@ -4967,32 +5161,34 @@ function CareerHub({ career, setCareer, onPlay, onHelp }) {
               SOUND_ENGINE.play('select');
               setTab(id);
             }}
-            className={`border-4 border-black px-2 py-3 text-[9px] shadow-[3px_3px_0_#000] sm:text-[11px] ${tab === id ? 'bg-[#ffd23f] text-black' : 'bg-[#1b1736] text-white hover:bg-[#241f48]'}`}
+            className={`border-2 border-black px-1 py-2 text-[7px] shadow-[2px_2px_0_#000] sm:border-4 sm:text-[10px] ${tab === id ? 'bg-[#ffd23f] text-black' : 'bg-[#1b1736] text-white hover:bg-[#241f48]'}`}
             style={FONT_STYLE}
           >
             {label}
           </button>
         ))}
-        <button type="button" onClick={onHelp} className="border-4 border-black bg-[#06d6a0] px-2 py-3 text-[9px] text-black shadow-[3px_3px_0_#000] sm:text-[11px]" style={FONT_STYLE}>
+        <button type="button" onClick={onHelp} className="border-2 border-black bg-[#06d6a0] px-1 py-2 text-[7px] text-black shadow-[2px_2px_0_#000] sm:border-4 sm:text-[10px]" style={FONT_STYLE}>
           ? HELP
         </button>
       </nav>
       {flash && (
-        <div role="status" className="border-2 border-black bg-black px-3 py-2 text-[8px] leading-relaxed" style={{ color: flash.ok ? '#06d6a0' : '#ef476f' }}>
+        <div role="status" className="pointer-events-none absolute left-1/2 top-24 z-30 w-[min(92%,560px)] -translate-x-1/2 border-4 border-black bg-black px-3 py-2 text-center text-[8px] leading-relaxed shadow-[4px_4px_0_#000]" style={{ color: flash.ok ? '#06d6a0' : '#ef476f' }}>
           {flash.text}
         </div>
       )}
-      {tab === 'home' && <HomeTab career={career} onPlay={onPlay} act={act} setTab={setTab} goMarket={goMarket} />}
-      {tab === 'roster' && <RosterTab career={career} act={act} goMarket={goMarket} />}
-      {tab === 'market' && <MarketTab career={career} act={act} filter={marketFilter} setFilter={setMarketFilter} />}
-      {tab === 'league' && <LeagueTab career={career} act={act} />}
-      {tab === 'schedule' && <ScheduleTab career={career} />}
+      <div className={`min-h-0 flex-1 ${tab === 'home' ? 'overflow-auto lg:overflow-hidden' : 'overflow-auto pr-1'}`}>
+        {tab === 'home' && <HomeTab career={career} onPlay={onPlay} act={act} setTab={setTab} goMarket={goMarket} />}
+        {tab === 'roster' && <RosterTab career={career} act={act} goMarket={goMarket} />}
+        {tab === 'market' && <MarketTab career={career} act={act} filter={marketFilter} setFilter={setMarketFilter} />}
+        {tab === 'league' && <LeagueTab career={career} act={act} />}
+        {tab === 'schedule' && <ScheduleTab career={career} />}
+      </div>
     </div>
   );
 }
 
 function NewCareerScreen({ hasSave, onCreate, onBack }) {
-  const [club, setClub] = useState({ name: 'NEON KNIGHTS', primary: '#e63946', secondary: '#fcbf49' });
+  const [club, setClub] = useState({ name: 'NEON KNIGHTS', primary: '#e63946', secondary: '#fcbf49', difficulty: 'pro' });
   const [armed, setArmed] = useState(false);
   const create = () => {
     if (hasSave && !armed) {
@@ -5008,6 +5204,17 @@ function NewCareerScreen({ hasSave, onCreate, onBack }) {
       </h1>
       <p className="text-center text-[8px] leading-relaxed text-slate-400">One club, three sports. You start with a free squad that only covers some positions. Win games, earn coins, sign stars.</p>
       <TeamCard index={0} team={club} onChange={setClub} head="helmet" />
+      <div className="border-4 border-black bg-[#1b1736] p-3 shadow-[4px_4px_0_#000]">
+        <div className="mb-2 text-[9px] text-slate-400">DIFFICULTY</div>
+        <div className="grid grid-cols-3 gap-2">
+          {Object.entries(GAME_CONFIG.cpu.difficulties).map(([id, d]) => (
+            <button key={id} type="button" onClick={() => setClub((c) => ({ ...c, difficulty: id }))} className={`border-4 border-black px-2 py-2 text-[9px] shadow-[3px_3px_0_#000] ${club.difficulty === id ? 'bg-[#c77dff] text-black' : 'bg-black text-white'}`} style={FONT_STYLE}>
+              {d.label}
+              <div className="mt-1 text-[7px] opacity-70">{GAME_CONFIG.answerSeconds[id]}s TO ANSWER</div>
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="flex flex-wrap justify-center gap-3">
         <PixelButton onClick={onBack} color="#8d99ae">
           ◀ BACK
@@ -5081,48 +5288,60 @@ function MenuTile({ title, sub, color, onClick, big }) {
 
 function TitleScreen({ career, onContinue, onNew, onQuick, onTutorial }) {
   const answerCount = useMemo(() => TRIVIA_BANK.reduce((s, p) => s + p.answers.length, 0), []);
-  const categories = useMemo(() => new Set(TRIVIA_BANK.map((p) => p.category)).size, []);
+  const tiles = career
+    ? [
+        { big: true, title: '▶ CONTINUE', sub: `${career.teams[0].name} · S${career.season} · ${career.coins.toLocaleString()}c`, color: '#ffd23f', onClick: onContinue },
+        { big: true, title: 'QUICK MATCH', sub: 'Any sport, vs CPU or a friend', color: '#c77dff', onClick: onQuick },
+        { title: 'NEW CAREER', sub: 'Start over with a new club', color: '#4cc9f0', onClick: onNew },
+        { title: '? HOW TO PLAY', sub: 'Controls, tiers, all 4 sports', color: '#06d6a0', onClick: onTutorial },
+      ]
+    : [
+        { big: true, title: '▶ START CAREER', sub: 'Build a club across all 4 sports', color: '#ffd23f', onClick: onNew },
+        { big: true, title: 'QUICK MATCH', sub: 'Any sport, vs CPU or a friend', color: '#c77dff', onClick: onQuick },
+        { title: '? HOW TO PLAY', sub: 'Controls, tiers, all 4 sports', color: '#06d6a0', onClick: onTutorial, wide: true },
+      ];
   return (
-    <div className="relative flex flex-1 flex-col overflow-hidden">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <StadiumBackdrop />
-      <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(13,11,30,0.82) 0%, rgba(13,11,30,0.55) 40%, rgba(13,11,30,0.9) 78%, #0d0b1e 100%)' }} />
-      <div style={GUTTER} className="relative z-10 flex flex-1 flex-col items-center justify-center gap-4 py-4 text-center [@media(min-height:820px)]:gap-8 [@media(min-height:820px)]:py-8">
-        <div>
-          <h1 className="text-[#ffd23f]" style={{ fontSize: 'clamp(2rem, min(9vw, 11vh), 8rem)', lineHeight: 1.05, textShadow: '0.06em 0.06em 0 #e63946, 0.12em 0.12em 0 #000' }}>
+      <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(13,11,30,0.85) 0%, rgba(13,11,30,0.55) 45%, rgba(13,11,30,0.92) 100%)' }} />
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center text-center" style={{ ...GUTTER, gap: 'clamp(8px, 2.6vh, 30px)', paddingTop: 'clamp(6px, 2vh, 24px)', paddingBottom: 'clamp(6px, 2vh, 24px)' }}>
+        <div className="shrink-0">
+          <h1 className="text-[#ffd23f]" style={{ fontSize: 'clamp(1.6rem, min(8.5vw, 10vh), 7rem)', lineHeight: 1.05, textShadow: '0.06em 0.06em 0 #e63946, 0.12em 0.12em 0 #000' }}>
             RETRO CLASH
           </h1>
-          <div className="mt-3 text-[#4cc9f0]" style={{ fontSize: 'clamp(0.9rem, min(3.4vw, 4.4vh), 2.6rem)', textShadow: '0.08em 0.08em 0 #000' }}>
+          <div className="text-[#4cc9f0]" style={{ marginTop: 'clamp(4px, 1.2vh, 14px)', fontSize: 'clamp(0.75rem, min(3vw, 3.8vh), 2.2rem)', textShadow: '0.08em 0.08em 0 #000' }}>
             TRIVIA BOWL
           </div>
-          <p className="mx-auto mt-4 max-w-2xl text-[9px] leading-relaxed text-slate-200 sm:text-xs">Real-time arcade sports where every pass, shot and throw asks a trivia question. Name the answer nobody else would: rare answers score, obvious ones get intercepted.</p>
+          <p className="mx-auto mt-3 max-w-2xl text-[9px] leading-relaxed text-slate-200 sm:text-[10px] [@media(max-height:760px)]:hidden">Real-time arcade sports. Every shot asks a question: rare answers score, obvious ones get intercepted.</p>
         </div>
-        <div className="grid w-full max-w-4xl gap-4 sm:grid-cols-2">
-          {career ? (
-            <MenuTile big title={`▶ CONTINUE CAREER`} sub={`${career.teams[0].name} · SEASON ${career.season} · ${career.coins.toLocaleString()} COINS`} color="#ffd23f" onClick={onContinue} />
-          ) : (
-            <MenuTile big title="▶ START A CAREER" sub="Found a club, fill every position, and chase the title across all 4 sports." color="#ffd23f" onClick={onNew} />
-          )}
-          <MenuTile big title="QUICK MATCH" sub="One real-time game. Pick any of the 4 sports and play the CPU or a friend on the same keyboard." color="#c77dff" onClick={onQuick} />
-          {career && <MenuTile title="NEW CAREER" sub="Start over with a new club (replaces your current save)." color="#4cc9f0" onClick={onNew} />}
-          <div className={career ? '' : 'sm:col-span-2'}>
-            <MenuTile title="? HOW TO PLAY" sub="Controls, rarity tiers, counter-attacks, all four sports and career mode." color="#06d6a0" onClick={onTutorial} />
-          </div>
+        <div className="grid w-full max-w-3xl shrink-0 grid-cols-1 gap-3 sm:grid-cols-2">
+          {tiles.map((t) => (
+            <button
+              key={t.title}
+              type="button"
+              onClick={() => {
+                SOUND_ENGINE.unlock();
+                SOUND_ENGINE.play('select');
+                t.onClick();
+              }}
+              className={`flex flex-col items-start gap-1 border-4 border-black text-left text-black shadow-[5px_5px_0_#000] transition-transform hover:-translate-y-1 active:translate-x-[3px] active:translate-y-[3px] active:shadow-[2px_2px_0_#000] ${t.wide ? 'sm:col-span-2' : ''}`}
+              style={{ background: t.color, ...FONT_STYLE, padding: t.big ? 'clamp(8px, 1.9vh, 20px) clamp(12px, 1.8vw, 22px)' : 'clamp(6px, 1.3vh, 14px) clamp(12px, 1.8vw, 22px)' }}
+            >
+              <span className={t.big ? 'text-sm sm:text-lg [@media(min-height:860px)]:text-2xl' : 'text-xs sm:text-sm'}>{t.title}</span>
+              <span className="text-[8px] text-black/70 sm:text-[9px] [@media(max-height:640px)]:hidden">{t.sub}</span>
+            </button>
+          ))}
         </div>
-      </div>
-      <div style={GUTTER} className="relative z-10 grid gap-3 pb-4 sm:grid-cols-2 lg:grid-cols-4 [@media(max-height:700px)]:hidden">
-        {Object.values(SPORT_INFO).map((e) => (
-          <div key={e.id} className="flex items-start gap-3 border-4 border-black bg-[#1b1736]/90 p-3 shadow-[4px_4px_0_#000]">
-            <span className="text-2xl" aria-hidden="true">
-              {e.icon}
+        <div className="flex shrink-0 flex-wrap items-center justify-center gap-2">
+          {Object.values(SPORT_INFO).map((e) => (
+            <span key={e.id} className="flex items-center gap-2 border-2 border-black bg-[#1b1736]/90 px-2 py-1 text-[8px] text-[#ffd23f] shadow-[2px_2px_0_#000] sm:text-[9px]">
+              <span aria-hidden="true">{e.icon}</span>
+              {e.label}
             </span>
-            <div className="min-w-0">
-              <div className="text-[10px] text-[#ffd23f]">{e.label}</div>
-              <div className="mt-1 text-[8px] leading-relaxed text-slate-300 [@media(max-height:860px)]:hidden">{e.blurb}</div>
-            </div>
-          </div>
-        ))}
-        <div className="text-center text-[8px] text-slate-400 sm:col-span-2 lg:col-span-4" style={{ fontVariantNumeric: 'tabular-nums' }}>
-          {TRIVIA_BANK.length} PROMPTS · {answerCount.toLocaleString()} RANKED ANSWERS · {categories} CATEGORIES · CAREER SAVES IN THIS BROWSER
+          ))}
+        </div>
+        <div className="shrink-0 text-[7px] text-slate-400 sm:text-[8px] [@media(max-height:560px)]:hidden" style={{ fontVariantNumeric: 'tabular-nums' }}>
+          {TRIVIA_BANK.length} PROMPTS · {answerCount.toLocaleString()} RANKED ANSWERS · CAREER SAVES IN THIS BROWSER
         </div>
       </div>
     </div>
@@ -5184,7 +5403,7 @@ function tutorialPages() {
         <>
           <p>It's a real-time arcade sports game where trivia powers every big play. Move your player with WASD (or the arrow keys).</p>
           <p>
-            <span className="text-[#ffd23f]">When you pass, shoot, throw or hit, the game freezes and asks you a question</span>, like "{sample.prompt}". You have {C.timerSeconds} seconds to type an answer that's on the board.
+            <span className="text-[#ffd23f]">When you pass, shoot, throw or hit, the game freezes and asks you a question</span>, like "{sample.prompt}". You have {C.answerSeconds.pro} seconds on Pro ({C.answerSeconds.rookie} on Rookie, {C.answerSeconds.legend} on Legend). Typos and shorthand are fine: if the game isn't sure, it asks "Did you mean...?" and pauses the clock.
           </p>
           <p>The rarer your answer, the better the play. The CPU never waits: it acts instantly.</p>
           <div className="flex items-end justify-center gap-4 border-4 border-black bg-[#3d9140] px-4 pt-3">
@@ -5471,6 +5690,7 @@ function removeFromLineup(c, id) {
 
 /** v1 saves (3 sports, free-form positions) -> v2 (4 sports, fixed roles + lineups). */
 function migrateCareer(c) {
+  if (c && c.version === 2 && !c.difficulty) c.difficulty = 'pro';
   if (!c || c.version === 2) return c;
   if (c.version !== 1) return null;
   c.version = 2;
@@ -5872,36 +6092,54 @@ function ArcadeScreen({ setup, career, onExit, onRematch }) {
     setTimeout(() => input.clear(), 0); // don't let the START keypress count as an action
   }, [input]);
 
-  const answer = useCallback(
-    (text, timedOut) => {
+  const commit = useCallback(
+    (cur, raw) => {
       const m = M.current;
-      const S = m.S;
-      const cur = m.q;
-      if (!cur) return undefined;
-      let raw;
-      if (timedOut) raw = { kind: 'timeout', text: '' };
-      else {
-        const hit = matchAnswer(text, cur.prompt);
-        if (!hit) raw = { kind: 'invalid', text };
-        else if (m.used.has(usedKey(cur.prompt.id, hit.idx))) raw = { kind: 'duplicate', text, idx: hit.idx, tier: hit.answer.tier, matchedText: hit.answer.text };
-        else raw = { kind: 'answer', text, idx: hit.idx, tier: hit.answer.tier, matchedText: hit.answer.text };
-        if (raw.kind !== 'answer' && m.retries[cur.team] > 0) {
-          m.retries[cur.team] -= 1;
-          SOUND_ENGINE.play('wrong');
-          return `SECOND WIND (${mods[cur.team].src.retries}): "${text}" ${raw.kind === 'duplicate' ? 'was already used' : "isn't on the board"}. Try again! (${m.retries[cur.team]} left)`;
-        }
+      if (raw.kind !== 'answer' && raw.kind !== 'timeout' && m.retries[cur.team] > 0) {
+        m.retries[cur.team] -= 1;
+        SOUND_ENGINE.play('wrong');
+        return `SECOND WIND (${mods[cur.team].src.retries}): "${raw.text}" ${raw.kind === 'duplicate' ? 'was already used' : "isn't on the board"}. Try again! (${m.retries[cur.team]} left)`;
       }
-      SOUND_ENGINE.play(raw.kind === 'answer' ? 'correct' : timedOut ? 'buzzer' : 'wrong');
+      SOUND_ENGINE.play(raw.kind === 'answer' ? 'correct' : raw.kind === 'timeout' ? 'buzzer' : 'wrong');
       const { outcome, triggers } = finalizeOutcome(m, mods, cur.team, cur.prompt, raw);
-      const best = cur.prompt.answers.filter((a, i) => a.tier === 5 && !m.used.has(usedKey(cur.prompt.id, i))).slice(0, 3).map((a) => a.text);
+      const best = cur.prompt.answers.filter((a, k) => a.tier === 5 && !m.used.has(usedKey(cur.prompt.id, k))).slice(0, 3).map((a) => a.text);
       setFeed({ id: cur.id, team: cur.team, kind: cur.kind, outcome, triggers, best, total: cur.prompt.answers.length });
       m.q = null;
       setQ(null);
       input.clear();
-      arcadeResolve(S, outcome);
+      arcadeResolve(m.S, outcome);
       return undefined;
     },
     [mods, input]
+  );
+
+  const answer = useCallback(
+    async (payload) => {
+      const m = M.current;
+      const cur = m.q;
+      if (!cur) return undefined;
+      const fromIdx = (idx, typed, via) => {
+        const a = cur.prompt.answers[idx];
+        if (m.used.has(usedKey(cur.prompt.id, idx))) return { kind: 'duplicate', text: typed, idx, tier: a.tier, matchedText: a.text };
+        return { kind: 'answer', text: typed, idx, tier: a.tier, matchedText: a.text, via };
+      };
+      if (payload.type === 'pick') return commit(cur, fromIdx(payload.idx, payload.text, payload.source));
+      const typed = payload.text;
+      if (payload.type === 'text') {
+        const d = decideMatch(suggestAnswers(typed, cur.prompt));
+        if (d.kind === 'auto') return commit(cur, fromIdx(d.pick.idx, typed, 'auto'));
+        if (d.kind === 'confirm') return { choices: true, list: d.list.map((x) => ({ idx: x.idx, text: x.answer.text })), source: 'autocorrect', typed };
+      }
+      // Nothing matched, or the player said NO to the suggestions: on the claude.ai page, ask Claude.
+      if (payload.source !== 'claude') {
+        const r = await askClaudeJudge(typed, cur.prompt);
+        if (M.current.q !== cur) return undefined;
+        if (r && r.index != null) return { choices: true, list: [{ idx: r.index, text: cur.prompt.answers[r.index].text }], source: 'claude', typed };
+        if (r && r.valid) return commit(cur, { kind: 'answer', tier: 4, idx: null, text: typed, matchedText: `${r.label} (correct, not on the list)`, via: 'claude' });
+      }
+      return commit(cur, { kind: 'invalid', text: typed });
+    },
+    [commit]
   );
 
   const finish = useCallback(() => {
@@ -5924,7 +6162,7 @@ function ArcadeScreen({ setup, career, onExit, onRematch }) {
         </span>
         <span className="hidden shrink-0 sm:inline">RARER = BETTER {ACTION_WORDS[q.kind]}</span>
       </div>
-      <PromptPanel key={q.id} prompt={q.prompt} team={teams[q.team]} seconds={GAME_CONFIG.timerSeconds + mods[q.team].extraTime} bonusSeconds={mods[q.team].extraTime} hint={q.hint} onSubmit={(t) => answer(t, false)} onTimeout={() => answer('', true)} />
+      <PromptPanel key={q.id} prompt={q.prompt} team={teams[q.team]} seconds={(GAME_CONFIG.answerSeconds[career ? career.difficulty : setup.difficulty] || 10) + mods[q.team].extraTime} bonusSeconds={mods[q.team].extraTime} hint={q.hint} onSubmit={answer} onTimeout={() => M.current.q && commit(M.current.q, { kind: 'timeout', text: '' })} />
     </div>
   );
 
@@ -5951,6 +6189,12 @@ function ArcadeScreen({ setup, career, onExit, onRematch }) {
               {feed.outcome.kind === 'answer' ? <TierChip tier={feed.outcome.tier} small /> : <span className="border-2 border-black bg-[#ef476f] px-1 text-[8px] text-black">{feed.outcome.kind === 'duplicate' ? 'ALREADY USED' : feed.outcome.kind === 'timeout' ? 'TIME UP' : 'NOT ON THE BOARD'}</span>}
               {feed.outcome.counter && <span className="text-[8px] text-[#ef476f]">⚠ COUNTERED</span>}
             </div>
+            {feed.outcome.matchedText && normalizeAnswer(feed.outcome.matchedText) !== normalizeAnswer(feed.outcome.text) && (
+              <div className="mt-1 text-[7px] text-[#06d6a0]">
+                ✓ COUNTED AS: {feed.outcome.matchedText}
+                {feed.outcome.via === 'claude' ? ' (CLAUDE)' : ''}
+              </div>
+            )}
             {feed.triggers.map((t, i) => (
               <div key={i} className="mt-1 text-[7px] text-[#4cc9f0]">
                 ⚡ {t}
@@ -6200,17 +6444,19 @@ export default function RetroClashTriviaBowl() {
     const setup = {
       sport,
       mode: '1p',
-      difficulty: 'pro',
+      difficulty: career.difficulty || 'pro',
       teams: [
         { name: club.name, primary: club.primary, secondary: club.secondary, isCPU: false, roster: rosterFor(career, 0, sport) },
         { name: rival.name, primary: rival.primary, secondary: rival.secondary, isCPU: true, roster: rosterFor(career, rivalIdx, sport) },
       ],
     };
     const rating = teamRating(career, rivalIdx, sport);
+    const difficulty = career.difficulty || 'pro';
     const ctx = {
+      difficulty,
       mods: [computeMods(activeFor(career, 0, sport)), computeMods(activeFor(career, rivalIdx, sport))],
       cpuWeights: cpuWeightsForRating(rating),
-      cpuSkill: 0.8 + rating * 0.06,
+      cpuSkill: (0.8 + rating * 0.06) * ({ rookie: 0.93, pro: 1, legend: 1.06 }[difficulty] || 1),
       label: career.phase === 'playoffs' ? f.label : `SEASON ${career.season} · WEEK ${career.week + 1}`,
       onFinish: (res) => {
         setCareer((c) => finishUserMatch(c, res));
@@ -6223,10 +6469,11 @@ export default function RetroClashTriviaBowl() {
   };
 
   const inMatch = screen === 'match' || screen === 'quickMatch';
+  const fixedPage = inMatch || screen === 'title' || (screen === 'hub' && !!career);
   const barBtn = 'border-2 border-black bg-[#1b1736] px-2 py-1 text-[9px] shadow-[2px_2px_0_#000] hover:bg-[#241f48]';
 
   return (
-    <div className={`retro-bg flex flex-col text-white ${inMatch ? 'h-[100dvh] overflow-hidden' : 'min-h-[100dvh]'}`} style={FONT_STYLE}>
+    <div className={`retro-bg flex flex-col text-white ${fixedPage ? 'h-[100dvh] overflow-hidden' : 'min-h-[100dvh]'}`} style={FONT_STYLE}>
       <style>{RETRO_CSS}</style>
       <div style={GUTTER} className="flex shrink-0 items-center justify-between gap-2 border-b-4 border-black bg-[#0a0818] py-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -6254,11 +6501,11 @@ export default function RetroClashTriviaBowl() {
           </button>
         </div>
       </div>
-      <main className={`flex flex-1 flex-col ${inMatch ? 'min-h-0' : ''}`}>
+      <main className={`flex flex-1 flex-col ${fixedPage ? 'min-h-0' : ''}`}>
         {screen === 'title' ? (
           <TitleScreen career={career} onContinue={() => setScreen('hub')} onNew={() => setScreen('newCareer')} onQuick={() => setScreen('quickSetup')} onTutorial={() => setTutorial(true)} />
         ) : (
-          <div style={GUTTER} className={`flex flex-1 flex-col ${inMatch ? 'min-h-0 py-2' : 'py-4'}`}>
+          <div style={GUTTER} className={`flex flex-1 flex-col ${fixedPage ? 'min-h-0 py-2' : 'py-4'}`}>
             {screen === 'newCareer' && (
               <NewCareerScreen
                 hasSave={!!career}
