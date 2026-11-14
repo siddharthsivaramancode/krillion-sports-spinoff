@@ -4,7 +4,7 @@ A retro pixel-art, **real-time** arcade sports game powered by trivia. Move with
 
 - **4 sports:** soccer and basketball (5-on-5, control switches to whoever you pass to), football (5-on-5, hike / throw / run), tennis (tiebreak; run to the ball, every shot is a question).
 - **Career mode:** one club, 8-team league with playoffs. You choose the sport for every match. Each sport has positions (e.g. soccer GK/DEF/MID/WING/ST) and you can only play a sport once every position has a starter, so you buy players in the market, poach from rivals, manage contracts, wages and morale. Every player has a unique ability.
-- **Trivia bank:** 174 prompts and ~11,300 answers across 12 categories, each ranked from most common to rarest.
+- **Trivia bank:** 226 prompts and ~19,500 answers (sports, pop culture, Family-Feud-style everyday questions and more), each ranked from most common to rarest. No prompt repeats within a match, categories rotate, and school-style prompts show up less often.
 
 ## Play
 

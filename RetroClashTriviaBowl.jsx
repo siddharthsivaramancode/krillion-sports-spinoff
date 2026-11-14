@@ -3270,18 +3270,57 @@ export function matchAnswer(guess, prompt) {
 // --- Prompt deck + CPU brain -------------------------------------------------
 const usedKey = (promptId, idx) => `${promptId}#${idx}`;
 
-function drawPrompt(g) {
-  for (let tries = 0; tries < TRIVIA_BANK.length * 2; tries++) {
-    if (g.deckPos >= g.deck.length) {
-      g.deck = shuffle(TRIVIA_BANK.map((_, i) => i));
-      g.deckPos = 0;
-    }
-    const p = TRIVIA_BANK[g.deck[g.deckPos++]];
-    const used = p.answers.filter((_, i) => g.used.has(usedKey(p.id, i))).length;
-    if (used / p.answers.length < GAME_CONFIG.prompts.retireWhenUsedRatio) return p;
+const RECENT_PROMPTS_KEY = 'retro-clash-recent-prompts';
+function loadRecentPrompts() {
+  try {
+    return JSON.parse(window.localStorage.getItem(RECENT_PROMPTS_KEY) || '[]');
+  } catch (e) {
+    return [];
   }
-  g.used.clear(); // every prompt is exhausted: recycle the whole bank
-  return TRIVIA_BANK[g.deck[0]];
+}
+function rememberPrompt(id) {
+  try {
+    const list = loadRecentPrompts().filter((x) => x !== id);
+    list.push(id);
+    window.localStorage.setItem(RECENT_PROMPTS_KEY, JSON.stringify(list.slice(-90)));
+  } catch (e) {
+    /* storage blocked: still no repeats within a match */
+  }
+}
+
+/** Pick the next prompt: never repeats within a match, never the same category 3 times running,
+ *  school-style prompts are rarer (weight), and prompts seen in recent matches are deprioritised. */
+export function drawPrompt(g) {
+  if (!g.seen) g.seen = new Set();
+  if (!g.recentCats) g.recentCats = [];
+  if (!g.recentSet) g.recentSet = new Set(loadRecentPrompts());
+  const fresh = (pr) => pr.answers.filter((_, k) => g.used.has(usedKey(pr.id, k))).length / pr.answers.length < GAME_CONFIG.prompts.retireWhenUsedRatio;
+  const lastCats = g.recentCats.slice(-2);
+  let list = TRIVIA_BANK.filter((pr) => !g.seen.has(pr.id) && fresh(pr) && !lastCats.includes(pr.category));
+  if (!list.length) list = TRIVIA_BANK.filter((pr) => !g.seen.has(pr.id) && fresh(pr));
+  if (!list.length) {
+    g.seen.clear();
+    list = TRIVIA_BANK.filter(fresh);
+  }
+  if (!list.length) {
+    g.used.clear();
+    list = TRIVIA_BANK;
+  }
+  const weights = list.map((pr) => (pr.weight != null ? pr.weight : 1) * (g.recentSet.has(pr.id) ? 0.15 : 1));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  let chosen = list[list.length - 1];
+  for (let k = 0; k < list.length; k++) {
+    r -= weights[k];
+    if (r <= 0) {
+      chosen = list[k];
+      break;
+    }
+  }
+  g.seen.add(chosen.id);
+  g.recentCats.push(chosen.category);
+  rememberPrompt(chosen.id);
+  return chosen;
 }
 
 function weightedPick(weights) {
